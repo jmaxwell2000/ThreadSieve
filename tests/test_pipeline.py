@@ -5,7 +5,7 @@ import unittest
 import _bootstrap  # noqa: F401
 
 from threadsieve.archive import archive_thread
-from threadsieve.extractor import extract_items, parse_model_json, repair_span
+from threadsieve.extractor import build_extraction_messages, extract_items, parse_model_json, repair_span
 from threadsieve.importers import import_text
 from threadsieve.index import index_object, index_thread, search
 from threadsieve.writer import write_item
@@ -36,6 +36,13 @@ class PipelineTests(unittest.TestCase):
         parsed = parse_model_json('Sure:\n```json\n{"items": []}\n```')
 
         self.assertEqual(parsed, {"items": []})
+
+    def test_extraction_messages_keep_json_protocol_when_prompt_is_custom(self):
+        thread = import_text("User: Capture this idea.", title="Custom prompt")
+
+        messages = build_extraction_messages(thread, "Extract only decisions.")
+
+        self.assertIn("json", " ".join(message["content"].lower() for message in messages))
 
     def test_span_repair_prefers_exact_text(self):
         content = "Alpha beta gamma delta."

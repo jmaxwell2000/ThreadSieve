@@ -12,6 +12,11 @@ from .prompts import DEFAULT_EXTRACT_PROMPT
 from .providers import build_provider, fetch_json, provider_request
 
 
+RESPONSE_FORMAT_PROTOCOL_PROMPT = """ThreadSieve protocol requirement:
+Return a single valid JSON object with an "items" array. Do not wrap the JSON in Markdown.
+"""
+
+
 def extract_items(thread: Thread, model_config: dict[str, Any], threshold: float, system_prompt: str | None = None) -> list[KnowledgeItem]:
     provider = build_provider(model_config)
     if provider.kind == "offline" or provider.name in {"offline", "none", "heuristic"}:
@@ -52,10 +57,7 @@ def openai_compatible_extract(thread: Thread, model_config: dict[str, Any], syst
     provider = build_provider(model_config)
     request = provider_request(
         provider,
-        messages=[
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": json.dumps(extraction_payload(thread), ensure_ascii=False)},
-        ],
+        messages=build_extraction_messages(thread, system_prompt),
         response_format={"type": "json_object"},
     )
     response_data = fetch_json(request, timeout=provider.timeout_seconds)
@@ -65,6 +67,15 @@ def openai_compatible_extract(thread: Thread, model_config: dict[str, Any], syst
     if isinstance(parsed, dict):
         return list(parsed.get("items") or [])
     raise RuntimeError("Model returned JSON, but not the expected object shape.")
+
+
+def build_extraction_messages(thread: Thread, system_prompt: str) -> list[dict[str, str]]:
+    return [
+        {"role": "system", "content": system_prompt},
+        {"role": "system", "content": RESPONSE_FORMAT_PROTOCOL_PROMPT},
+        {"role": "user", "content": json.dumps(extraction_payload(thread), ensure_ascii=False)},
+    ]
+
 
 def parse_model_json(content: str) -> Any:
     """Parse JSON from common chat-model wrappers without accepting arbitrary prose as data."""
