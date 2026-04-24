@@ -1,16 +1,14 @@
 from __future__ import annotations
 
 import json
-import os
 import re
-import urllib.error
-import urllib.request
 from collections import Counter
 from difflib import SequenceMatcher
 from typing import Any
 
 from .ids import stable_item_id
 from .models import KnowledgeItem, SourceRef, Thread
+from .providers import build_provider, fetch_json, provider_request
 
 
 EXTRACTION_SYSTEM_PROMPT = """You are ThreadSieve, a precise conversation-to-knowledge extractor.
@@ -23,8 +21,8 @@ Supported item types: idea, decision, open_loop, question, task, draft, product_
 
 
 def extract_items(thread: Thread, model_config: dict[str, Any], threshold: float) -> list[KnowledgeItem]:
-    provider = str(model_config.get("provider") or "offline").lower()
-    if provider in {"offline", "none", "heuristic"}:
+    provider = build_provider(model_config)
+    if provider.kind == "offline" or provider.name in {"offline", "none", "heuristic"}:
         raw_items = offline_extract(thread)
     else:
         raw_items = openai_compatible_extract(thread, model_config)
@@ -59,48 +57,22 @@ def offline_extract(thread: Thread) -> list[dict[str, Any]]:
 
 
 def openai_compatible_extract(thread: Thread, model_config: dict[str, Any]) -> list[dict[str, Any]]:
-    base_url = str(model_config.get("base_url") or "").rstrip("/")
-    model = str(model_config.get("model") or "")
-    api_key_env = str(model_config.get("api_key_env") or "THREADSIEVE_API_KEY")
-    api_key = os.environ.get(api_key_env) or str(model_config.get("api_key") or "")
-    if not base_url or not model:
-        raise RuntimeError("Model config must include base_url and model.")
-
-    payload = {
-        "model": model,
-        "temperature": float(model_config.get("temperature", 0.1)),
-        "response_format": {"type": "json_object"},
-        "messages": [
+    provider = build_provider(model_config)
+    request = provider_request(
+        provider,
+        messages=[
             {"role": "system", "content": EXTRACTION_SYSTEM_PROMPT},
             {"role": "user", "content": json.dumps(extraction_payload(thread), ensure_ascii=False)},
         ],
-    }
-    data = json.dumps(payload).encode("utf-8")
-    request = urllib.request.Request(
-        f"{base_url}/chat/completions",
-        data=data,
-        headers={
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {api_key}" if api_key else "Bearer no-key",
-        },
-        method="POST",
+        response_format={"type": "json_object"},
     )
-    response_data = request_json(request, timeout=float(model_config.get("timeout_seconds", 120)))
+    response_data = fetch_json(request, timeout=provider.timeout_seconds)
 
     content = response_data["choices"][0]["message"]["content"]
     parsed = parse_model_json(content)
     if isinstance(parsed, dict):
         return list(parsed.get("items") or [])
     raise RuntimeError("Model returned JSON, but not the expected object shape.")
-
-
-def request_json(request: urllib.request.Request, timeout: float) -> dict[str, Any]:
-    try:
-        with urllib.request.urlopen(request, timeout=timeout) as response:
-            return json.loads(response.read().decode("utf-8"))
-    except urllib.error.URLError as exc:
-        raise RuntimeError(f"Model request failed: {exc}") from exc
-
 
 def parse_model_json(content: str) -> Any:
     """Parse JSON from common chat-model wrappers without accepting arbitrary prose as data."""

@@ -102,9 +102,38 @@ In another terminal:
 
 ```bash
 threadsieve init --workspace ~/ThreadSieve
+threadsieve configure-provider ollama --model qwen2.5:14b
+threadsieve doctor
+threadsieve test-provider
+threadsieve extract --file examples/thread.md
 ```
 
-Edit `~/.threadsieve/config.json`:
+Ollama keeps inference local, but the model still sees the thread text. Choose a model you trust for the sensitivity of your chats.
+
+## Use OpenRouter
+
+OpenRouter is a hosted provider router. When you use it, ThreadSieve sends the thread text you extract to OpenRouter and whichever upstream model handles the request.
+
+Create an API key in OpenRouter, then type:
+
+```bash
+export OPENROUTER_API_KEY="paste-your-key-here"
+threadsieve configure-provider openrouter --model openai/gpt-4o-mini
+threadsieve doctor
+threadsieve test-provider
+threadsieve extract --file examples/thread.md
+```
+
+To make the key available in every new Terminal window, add it to your shell profile:
+
+```bash
+echo 'export OPENROUTER_API_KEY="paste-your-key-here"' >> ~/.zshrc
+source ~/.zshrc
+```
+
+ThreadSieve stores only the environment variable name in config, not the key itself.
+
+The generated config will look like this:
 
 ```json
 {
@@ -112,10 +141,15 @@ Edit `~/.threadsieve/config.json`:
   "confidence_threshold": 0.55,
   "models": {
     "extract": {
-      "provider": "openai-compatible",
-      "base_url": "http://localhost:11434/v1",
-      "model": "qwen2.5:14b",
-      "api_key_env": "THREADSIEVE_API_KEY"
+      "kind": "openai-compatible",
+      "base_url": "https://openrouter.ai/api/v1",
+      "model": "openai/gpt-4o-mini",
+      "api_key_env": "OPENROUTER_API_KEY",
+      "headers": {
+        "HTTP-Referer": "https://github.com/jmaxwell2000/ThreadSieve",
+        "X-Title": "ThreadSieve"
+      },
+      "provider": "openrouter"
     }
   },
   "redaction": {
@@ -131,7 +165,7 @@ Then run:
 threadsieve extract --file examples/thread.md
 ```
 
-## Use a Hosted OpenAI-Compatible API
+## Use Another OpenAI-Compatible API
 
 Set your key:
 
@@ -148,13 +182,27 @@ Edit `~/.threadsieve/config.json` with your provider:
   "models": {
     "extract": {
       "provider": "openai-compatible",
-      "base_url": "https://api.openai.com/v1",
-      "model": "gpt-4.1-mini",
+      "base_url": "https://api.example.com/v1",
+      "model": "your-model-name",
       "api_key_env": "THREADSIEVE_API_KEY"
     }
   }
 }
 ```
+
+Useful provider commands:
+
+```bash
+threadsieve providers
+threadsieve configure-provider offline
+threadsieve configure-provider ollama --model qwen2.5:14b
+threadsieve configure-provider openrouter --model openai/gpt-4o-mini
+threadsieve configure-provider openai-compatible --base-url http://localhost:1234/v1 --model local-model
+threadsieve doctor
+threadsieve test-provider
+```
+
+`threadsieve doctor` does not send thread contents to any model. `threadsieve test-provider` sends only a tiny test prompt.
 
 ## Output Layout
 

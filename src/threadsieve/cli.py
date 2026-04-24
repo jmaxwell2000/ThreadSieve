@@ -13,6 +13,7 @@ from .config import Config, default_config_path, expand_path, load_config, write
 from .extractor import extract_items
 from .importers import import_file, import_text
 from .index import get_object, index_object, index_thread, latest_thread_path, search
+from .providers import PROVIDER_PRESETS, build_provider, fetch_json, provider_request, provider_status
 from .writer import append_jsonl, write_item
 
 
@@ -37,6 +38,23 @@ def build_parser() -> argparse.ArgumentParser:
     init = subparsers.add_parser("init", help="Create config and workspace folders.")
     init.add_argument("--workspace", help="Workspace path. Defaults to ./ThreadSieve in the config.")
     init.set_defaults(func=cmd_init)
+
+    providers = subparsers.add_parser("providers", help="List supported LLM provider presets.")
+    providers.set_defaults(func=cmd_providers)
+
+    config_cmd = subparsers.add_parser("configure-provider", help="Write an extraction provider preset into the config.")
+    config_cmd.add_argument("provider", choices=sorted(PROVIDER_PRESETS.keys()))
+    config_cmd.add_argument("--model", help="Override the preset model.")
+    config_cmd.add_argument("--base-url", help="Override the preset base URL.")
+    config_cmd.add_argument("--api-key-env", help="Override the preset API key environment variable.")
+    config_cmd.set_defaults(func=cmd_configure_provider)
+
+    doctor = subparsers.add_parser("doctor", help="Inspect local config and provider setup without sending thread contents.")
+    doctor.set_defaults(func=cmd_doctor)
+
+    test_provider = subparsers.add_parser("test-provider", help="Send a tiny test prompt to the configured provider.")
+    test_provider.add_argument("--prompt", default="Reply with JSON: {\"ok\": true}", help="Tiny prompt to send to the configured provider.")
+    test_provider.set_defaults(func=cmd_test_provider)
 
     ingest = subparsers.add_parser("ingest", help="Ingest and archive a thread file.")
     ingest.add_argument("path", help="Path to ChatGPT JSON, normalized JSON, Markdown, or text.")
@@ -75,6 +93,62 @@ def cmd_init(args: argparse.Namespace) -> int:
     create_workspace(config.workspace)
     print(f"Config: {path}")
     print(f"Workspace: {config.workspace}")
+    return 0
+
+
+def cmd_providers(args: argparse.Namespace) -> int:
+    for name, preset in sorted(PROVIDER_PRESETS.items()):
+        network = "network" if preset.get("network") else "local"
+        print(f"{name}\t{network}\t{preset.get('description', '')}")
+    return 0
+
+
+def cmd_configure_provider(args: argparse.Namespace) -> int:
+    path = expand_path(args.config) if args.config else default_config_path()
+    write_default_config(path)
+    config = load_config(str(path))
+    preset = dict(PROVIDER_PRESETS[args.provider])
+    preset["provider"] = args.provider
+    preset.pop("description", None)
+    preset.pop("network", None)
+    if args.model:
+        preset["model"] = args.model
+    if args.base_url:
+        preset["base_url"] = args.base_url
+    if args.api_key_env:
+        preset["api_key_env"] = args.api_key_env
+    config.raw.setdefault("models", {})["extract"] = preset
+    path.write_text(json.dumps(config.raw, indent=2) + "\n", encoding="utf-8")
+    print(f"Configured extract provider: {args.provider}")
+    print(f"Config: {path}")
+    if preset.get("api_key_env"):
+        print(f"Set your API key with: export {preset['api_key_env']}=\"...\"")
+    return 0
+
+
+def cmd_doctor(args: argparse.Namespace) -> int:
+    config = load_config(args.config)
+    provider = build_provider(config.extract_model)
+    print(f"Config: {config.path}")
+    print(f"Workspace: {config.workspace}")
+    for key, value in provider_status(provider).items():
+        print(f"{key}: {value}")
+    if provider.network:
+        print("network_notice: extraction will send thread text to this provider when you run `extract`.")
+    return 0
+
+
+def cmd_test_provider(args: argparse.Namespace) -> int:
+    config = load_config(args.config)
+    provider = build_provider(config.extract_model)
+    if provider.kind == "offline":
+        print("offline provider is active; no network test is needed.")
+        return 0
+    print(f"Sending a tiny provider test to {provider.name} at {provider.base_url}.")
+    request = provider_request(provider, messages=[{"role": "user", "content": args.prompt}], response_format={"type": "json_object"})
+    response = fetch_json(request, timeout=provider.timeout_seconds)
+    content = response.get("choices", [{}])[0].get("message", {}).get("content")
+    print(content or json.dumps(response)[:1000])
     return 0
 
 

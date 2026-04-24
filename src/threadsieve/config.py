@@ -13,9 +13,6 @@ DEFAULT_CONFIG = {
     "models": {
         "extract": {
             "provider": "offline",
-            "base_url": "http://localhost:11434/v1",
-            "model": "qwen2.5:14b",
-            "api_key_env": "THREADSIEVE_API_KEY",
         }
     },
     "redaction": {
