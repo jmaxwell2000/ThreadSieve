@@ -204,6 +204,46 @@ threadsieve test-provider
 
 `threadsieve doctor` does not send thread contents to any model. `threadsieve test-provider` sends only a tiny test prompt.
 
+## Customize The Extraction Prompt
+
+ThreadSieve creates an editable extraction prompt when you run `init`.
+
+Show the active prompt path and contents:
+
+```bash
+threadsieve show-prompt
+```
+
+Show only the path:
+
+```bash
+threadsieve show-prompt --path-only
+```
+
+On macOS, open the prompt in TextEdit:
+
+```bash
+open "$(threadsieve show-prompt --path-only)"
+```
+
+Or edit it in Terminal:
+
+```bash
+nano "$(threadsieve show-prompt --path-only)"
+```
+
+The default prompt tells the model to return JSON only, extract fewer high-value objects, cite message IDs, include `exact_text` where possible, and avoid unsupported claims. After editing the prompt, run extraction normally:
+
+```bash
+threadsieve extract --clipboard
+```
+
+Restore the default prompt:
+
+```bash
+threadsieve reset-prompt --force
+```
+
 ## Output Layout
 
 ```text

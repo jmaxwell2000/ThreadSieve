@@ -15,6 +15,9 @@ DEFAULT_CONFIG = {
             "provider": "offline",
         }
     },
+    "prompts": {
+        "extract": "~/.threadsieve/prompts/extract.md",
+    },
     "redaction": {
         "enabled": False,
         "patterns": [],

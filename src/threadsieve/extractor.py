@@ -8,24 +8,16 @@ from typing import Any
 
 from .ids import stable_item_id
 from .models import KnowledgeItem, SourceRef, Thread
+from .prompts import DEFAULT_EXTRACT_PROMPT
 from .providers import build_provider, fetch_json, provider_request
 
 
-EXTRACTION_SYSTEM_PROMPT = """You are ThreadSieve, a precise conversation-to-knowledge extractor.
-Return JSON only. Extract fewer, higher-value knowledge objects.
-Every item must be grounded in source_refs using message IDs from the input.
-When possible, include exact_text on each source_ref so spans can be repaired if character offsets are wrong.
-Do not invent facts that are not supported by cited messages.
-Supported item types: idea, decision, open_loop, question, task, draft, product_concept, technical_pattern, research_lead, project_note, framework.
-"""
-
-
-def extract_items(thread: Thread, model_config: dict[str, Any], threshold: float) -> list[KnowledgeItem]:
+def extract_items(thread: Thread, model_config: dict[str, Any], threshold: float, system_prompt: str | None = None) -> list[KnowledgeItem]:
     provider = build_provider(model_config)
     if provider.kind == "offline" or provider.name in {"offline", "none", "heuristic"}:
         raw_items = offline_extract(thread)
     else:
-        raw_items = openai_compatible_extract(thread, model_config)
+        raw_items = openai_compatible_extract(thread, model_config, system_prompt or DEFAULT_EXTRACT_PROMPT)
     return validate_items(thread, raw_items, threshold)
 
 
@@ -56,12 +48,12 @@ def offline_extract(thread: Thread) -> list[dict[str, Any]]:
     return items
 
 
-def openai_compatible_extract(thread: Thread, model_config: dict[str, Any]) -> list[dict[str, Any]]:
+def openai_compatible_extract(thread: Thread, model_config: dict[str, Any], system_prompt: str = DEFAULT_EXTRACT_PROMPT) -> list[dict[str, Any]]:
     provider = build_provider(model_config)
     request = provider_request(
         provider,
         messages=[
-            {"role": "system", "content": EXTRACTION_SYSTEM_PROMPT},
+            {"role": "system", "content": system_prompt},
             {"role": "user", "content": json.dumps(extraction_payload(thread), ensure_ascii=False)},
         ],
         response_format={"type": "json_object"},

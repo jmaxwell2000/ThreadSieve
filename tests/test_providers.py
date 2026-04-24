@@ -8,6 +8,8 @@ from pathlib import Path
 import _bootstrap  # noqa: F401
 
 from threadsieve.cli import main
+from threadsieve.config import load_config
+from threadsieve.prompts import ensure_default_prompt
 from threadsieve.providers import build_provider, provider_status
 
 
@@ -44,6 +46,19 @@ class ProviderTests(unittest.TestCase):
             self.assertEqual(result, 0)
             self.assertIn('"provider": "ollama"', config_path.read_text(encoding="utf-8"))
             self.assertIn('"model": "llama3.2"', config_path.read_text(encoding="utf-8"))
+
+    def test_default_prompt_file_is_created(self):
+        with tempfile.TemporaryDirectory() as directory:
+            config_path = Path(directory) / "config.json"
+            with redirect_stdout(StringIO()):
+                result = main(["--config", str(config_path), "init", "--workspace", str(Path(directory) / "workspace")])
+
+            config = load_config(str(config_path))
+            prompt_path = ensure_default_prompt(config)
+
+            self.assertEqual(result, 0)
+            self.assertTrue(prompt_path.exists())
+            self.assertIn("Return JSON only", prompt_path.read_text(encoding="utf-8"))
 
 
 if __name__ == "__main__":

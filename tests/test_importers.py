@@ -52,6 +52,18 @@ class ImporterTests(unittest.TestCase):
         self.assertEqual(thread.messages[0].role, "assistant")
         self.assertEqual(thread.messages[1].role, "jamie")
 
+    def test_import_text_dash_speaker_delimiters(self):
+        thread = import_text(
+            "User: - I have an app idea.\nAssistant- Great, what problem does it solve?\nUser: - Tool sharing.",
+            title="Dash delimiters",
+        )
+
+        self.assertEqual(len(thread.messages), 3)
+        self.assertEqual(thread.messages[0].role, "user")
+        self.assertEqual(thread.messages[0].content, "I have an app idea.")
+        self.assertEqual(thread.messages[1].role, "assistant")
+        self.assertEqual(thread.messages[1].content, "Great, what problem does it solve?")
+
 
 if __name__ == "__main__":
     unittest.main()

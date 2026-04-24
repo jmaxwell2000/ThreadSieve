@@ -9,8 +9,11 @@ from .ids import stable_message_id, stable_thread_id
 from .models import Message, Thread, utc_now_iso
 
 
-KNOWN_ROLE_PATTERN = re.compile(r"^(user|assistant|system|human|ai|you|me|chatgpt|claude|gemini|copilot|perplexity)\s*:\s*(.*)$", re.I)
-GENERIC_SPEAKER_PATTERN = re.compile(r"^([A-Za-z][A-Za-z0-9 _.-]{1,40})\s*:\s+(.*)$")
+KNOWN_ROLE_PATTERN = re.compile(
+    r"^(user|assistant|system|human|ai|you|me|chatgpt|claude|gemini|copilot|perplexity)\s*(?::|-)\s*(?:-\s*)?(.*)$",
+    re.I,
+)
+GENERIC_SPEAKER_PATTERN = re.compile(r"^([A-Za-z][A-Za-z0-9 _.-]{1,40})\s*(?::|\s+-\s+)\s*(?:-\s*)?(.*)$")
 
 
 def import_file(path: Path, source_app: str | None = None) -> Thread:

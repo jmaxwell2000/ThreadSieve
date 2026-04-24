@@ -13,6 +13,7 @@ from .config import Config, default_config_path, expand_path, load_config, write
 from .extractor import extract_items
 from .importers import import_file, import_text
 from .index import get_object, index_object, index_thread, latest_thread_path, search
+from .prompts import ensure_default_prompt, load_extract_prompt
 from .providers import PROVIDER_PRESETS, build_provider, fetch_json, provider_request, provider_status
 from .writer import append_jsonl, write_item
 
@@ -56,6 +57,14 @@ def build_parser() -> argparse.ArgumentParser:
     test_provider.add_argument("--prompt", default="Reply with JSON: {\"ok\": true}", help="Tiny prompt to send to the configured provider.")
     test_provider.set_defaults(func=cmd_test_provider)
 
+    show_prompt = subparsers.add_parser("show-prompt", help="Print the active extraction prompt path and contents.")
+    show_prompt.add_argument("--path-only", action="store_true", help="Only print the prompt file path.")
+    show_prompt.set_defaults(func=cmd_show_prompt)
+
+    reset_prompt = subparsers.add_parser("reset-prompt", help="Create the default editable extraction prompt if missing.")
+    reset_prompt.add_argument("--force", action="store_true", help="Overwrite the existing prompt with the default prompt.")
+    reset_prompt.set_defaults(func=cmd_reset_prompt)
+
     ingest = subparsers.add_parser("ingest", help="Ingest and archive a thread file.")
     ingest.add_argument("path", help="Path to ChatGPT JSON, normalized JSON, Markdown, or text.")
     ingest.add_argument("--source-app", help="Override source app name.")
@@ -90,8 +99,10 @@ def cmd_init(args: argparse.Namespace) -> int:
         config.raw["workspace"] = args.workspace
         path.write_text(json.dumps(config.raw, indent=2) + "\n", encoding="utf-8")
         config = load_config(str(path))
+    prompt_path = ensure_default_prompt(config)
     create_workspace(config.workspace)
     print(f"Config: {path}")
+    print(f"Prompt: {prompt_path}")
     print(f"Workspace: {config.workspace}")
     return 0
 
@@ -152,6 +163,30 @@ def cmd_test_provider(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_show_prompt(args: argparse.Namespace) -> int:
+    config = load_config(args.config)
+    path = ensure_default_prompt(config)
+    print(path)
+    if not args.path_only:
+        print("")
+        print(path.read_text(encoding="utf-8"))
+    return 0
+
+
+def cmd_reset_prompt(args: argparse.Namespace) -> int:
+    from .prompts import DEFAULT_EXTRACT_PROMPT
+
+    config = load_config(args.config)
+    path = ensure_default_prompt(config)
+    if args.force:
+        path.write_text(DEFAULT_EXTRACT_PROMPT, encoding="utf-8")
+        print(f"Reset prompt: {path}")
+    else:
+        print(f"Prompt exists: {path}")
+        print("Use `threadsieve reset-prompt --force` to overwrite it.")
+    return 0
+
+
 def cmd_ingest(args: argparse.Namespace) -> int:
     config = load_config(args.config)
     create_workspace(config.workspace)
@@ -172,7 +207,7 @@ def cmd_extract(args: argparse.Namespace) -> int:
         source_dir = archive_thread(config.workspace, thread)
         index_thread(config.workspace, thread, source_dir)
 
-    items = extract_items(thread, config.extract_model, config.confidence_threshold)
+    items = extract_items(thread, config.extract_model, config.confidence_threshold, load_extract_prompt(config))
     if not items:
         print("No source-grounded items met the confidence threshold.")
         return 0
