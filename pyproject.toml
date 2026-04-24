@@ -1,0 +1,40 @@
+[build-system]
+requires = ["hatchling>=1.26"]
+build-backend = "hatchling.build"
+
+[project]
+name = "threadsieve"
+version = "0.1.0"
+description = "Local-first conversation-to-knowledge distillation CLI."
+readme = "README.md"
+requires-python = ">=3.11"
+license = "MIT"
+authors = [
+  { name = "ThreadSieve contributors" }
+]
+keywords = ["ai", "knowledge-management", "cli", "markdown", "sqlite", "chatgpt"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Environment :: Console",
+  "Intended Audience :: End Users/Desktop",
+  "License :: OSI Approved :: MIT License",
+  "Operating System :: MacOS",
+  "Operating System :: POSIX",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Topic :: Office/Business",
+  "Topic :: Text Processing :: Indexing"
+]
+dependencies = []
+
+[project.scripts]
+threadsieve = "threadsieve.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/threadsieve"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
