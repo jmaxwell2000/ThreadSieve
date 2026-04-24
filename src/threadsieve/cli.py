@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -46,7 +47,7 @@ def build_parser() -> argparse.ArgumentParser:
     extract.add_argument("path", nargs="?", help="Optional file path to ingest and extract.")
     extract.add_argument("--thread", choices=["latest"], help="Extract from the latest ingested thread.")
     extract.add_argument("--file", dest="file_path", help="Explicit file path to extract.")
-    extract.add_argument("--clipboard", action="store_true", help="Extract from macOS clipboard text using pbpaste.")
+    extract.add_argument("--clipboard", action="store_true", help="Extract from system clipboard text.")
     extract.add_argument("--source-app", help="Override source app name for file/clipboard input.")
     extract.set_defaults(func=cmd_extract)
 
@@ -55,7 +56,7 @@ def build_parser() -> argparse.ArgumentParser:
     search_cmd.add_argument("--limit", type=int, default=10)
     search_cmd.set_defaults(func=cmd_search)
 
-    open_cmd = subparsers.add_parser("open", help="Print a knowledge object path, or open it/source on macOS.")
+    open_cmd = subparsers.add_parser("open", help="Print a knowledge object path, or open it/source with the OS file opener.")
     open_cmd.add_argument("object_id")
     open_cmd.add_argument("--source", action="store_true", help="Open the archived source thread instead of the note.")
     open_cmd.add_argument("--print", action="store_true", help="Print the path instead of opening it.")
@@ -137,7 +138,7 @@ def cmd_open(args: argparse.Namespace) -> int:
     if args.print or os.environ.get("CI"):
         print(path)
         return 0
-    subprocess.run(["open", str(path)], check=True)
+    open_path(path)
     return 0
 
 
@@ -171,14 +172,57 @@ def create_workspace(workspace: Path) -> None:
 
 
 def read_clipboard() -> str:
-    try:
-        result = subprocess.run(["pbpaste"], check=True, text=True, stdout=subprocess.PIPE)
-    except (FileNotFoundError, subprocess.CalledProcessError) as exc:
-        raise RuntimeError("Could not read clipboard. On macOS, make sure `pbpaste` is available.") from exc
-    if not result.stdout.strip():
+    commands = clipboard_commands()
+    saw_clipboard_tool = False
+    for command in commands:
+        if not command_available(command[0]):
+            continue
+        saw_clipboard_tool = True
+        try:
+            result = subprocess.run(command, check=True, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        except (FileNotFoundError, subprocess.CalledProcessError):
+            continue
+        if result.stdout.strip():
+            return result.stdout
+    if saw_clipboard_tool:
         raise RuntimeError("Clipboard is empty.")
-    return result.stdout
+    names = ", ".join(command[0] for command in commands)
+    raise RuntimeError(f"Could not read clipboard. Install or enable one of: {names}.")
 
+
+def clipboard_commands() -> list[list[str]]:
+    if sys.platform == "darwin":
+        return [["pbpaste"]]
+    if sys.platform.startswith("win"):
+        return [["powershell.exe", "-NoProfile", "-Command", "Get-Clipboard"], ["powershell", "-NoProfile", "-Command", "Get-Clipboard"]]
+    return [
+        ["wl-paste", "--no-newline"],
+        ["xclip", "-selection", "clipboard", "-o"],
+        ["xsel", "--clipboard", "--output"],
+    ]
+
+
+def command_available(name: str) -> bool:
+    if sys.platform.startswith("win") and name.lower().endswith(".exe"):
+        return True
+    return shutil.which(name) is not None
+
+
+def open_path(path: Path) -> None:
+    if sys.platform == "darwin":
+        command = ["open", str(path)]
+    elif sys.platform.startswith("win"):
+        os.startfile(path)  # type: ignore[attr-defined]
+        return
+    elif shutil.which("xdg-open"):
+        command = ["xdg-open", str(path)]
+    else:
+        print(path)
+        return
+    try:
+        subprocess.run(command, check=True)
+    except (FileNotFoundError, subprocess.CalledProcessError) as exc:
+        raise RuntimeError(f"Could not open {path}. Use `threadsieve open ID --print` to print the path.") from exc
 
 def find_source_path(note_path: Path) -> Path | None:
     text = note_path.read_text(encoding="utf-8")

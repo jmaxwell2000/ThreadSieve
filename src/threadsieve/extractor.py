@@ -6,6 +6,7 @@ import re
 import urllib.error
 import urllib.request
 from collections import Counter
+from difflib import SequenceMatcher
 from typing import Any
 
 from .ids import stable_item_id
@@ -15,6 +16,7 @@ from .models import KnowledgeItem, SourceRef, Thread
 EXTRACTION_SYSTEM_PROMPT = """You are ThreadSieve, a precise conversation-to-knowledge extractor.
 Return JSON only. Extract fewer, higher-value knowledge objects.
 Every item must be grounded in source_refs using message IDs from the input.
+When possible, include exact_text on each source_ref so spans can be repaired if character offsets are wrong.
 Do not invent facts that are not supported by cited messages.
 Supported item types: idea, decision, open_loop, question, task, draft, product_concept, technical_pattern, research_lead, project_note, framework.
 """
@@ -83,17 +85,46 @@ def openai_compatible_extract(thread: Thread, model_config: dict[str, Any]) -> l
         },
         method="POST",
     )
-    try:
-        with urllib.request.urlopen(request, timeout=float(model_config.get("timeout_seconds", 120))) as response:
-            response_data = json.loads(response.read().decode("utf-8"))
-    except urllib.error.URLError as exc:
-        raise RuntimeError(f"Model request failed: {exc}") from exc
+    response_data = request_json(request, timeout=float(model_config.get("timeout_seconds", 120)))
 
     content = response_data["choices"][0]["message"]["content"]
-    parsed = json.loads(content)
+    parsed = parse_model_json(content)
     if isinstance(parsed, dict):
         return list(parsed.get("items") or [])
     raise RuntimeError("Model returned JSON, but not the expected object shape.")
+
+
+def request_json(request: urllib.request.Request, timeout: float) -> dict[str, Any]:
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            return json.loads(response.read().decode("utf-8"))
+    except urllib.error.URLError as exc:
+        raise RuntimeError(f"Model request failed: {exc}") from exc
+
+
+def parse_model_json(content: str) -> Any:
+    """Parse JSON from common chat-model wrappers without accepting arbitrary prose as data."""
+    try:
+        return json.loads(content)
+    except json.JSONDecodeError:
+        pass
+
+    fenced = re.search(r"```(?:json)?\s*(.*?)\s*```", content, re.IGNORECASE | re.DOTALL)
+    if fenced:
+        try:
+            return json.loads(fenced.group(1))
+        except json.JSONDecodeError:
+            pass
+
+    decoder = json.JSONDecoder()
+    for match in re.finditer(r"[\[{]", content):
+        try:
+            parsed, _ = decoder.raw_decode(content[match.start() :])
+        except json.JSONDecodeError:
+            continue
+        return parsed
+    preview = " ".join(content.split())[:160]
+    raise RuntimeError(f"Model did not return parseable JSON. Response began: {preview}")
 
 
 def extraction_payload(thread: Thread) -> dict[str, Any]:
@@ -106,7 +137,7 @@ def extraction_payload(thread: Thread) -> dict[str, Any]:
                     "summary": "grounded summary",
                     "body": "optional useful detail",
                     "tags": ["stable", "reusable", "tags"],
-                    "source_refs": [{"message_id": "msg_id", "start_char": 0, "end_char": 120}],
+                    "source_refs": [{"message_id": "msg_id", "start_char": 0, "end_char": 120, "exact_text": "cited text"}],
                     "confidence": 0.0,
                 }
             ]
@@ -137,8 +168,7 @@ def validate_items(thread: Thread, raw_items: list[dict[str, Any]], threshold: f
             message = message_by_id.get(source_ref.message_id)
             if not message:
                 continue
-            start = max(0, min(source_ref.start_char, len(message.content)))
-            end = max(start, min(source_ref.end_char, len(message.content)))
+            start, end = repair_span(message.content, ref, source_ref.start_char, source_ref.end_char)
             refs.append({"message_id": source_ref.message_id, "start_char": start, "end_char": end})
         if not refs:
             continue
@@ -151,6 +181,77 @@ def validate_items(thread: Thread, raw_items: list[dict[str, Any]], threshold: f
         if item.confidence >= threshold:
             items.append(item)
     return dedupe_items(items)
+
+
+def repair_span(content: str, raw_ref: dict[str, Any], start_char: int, end_char: int) -> tuple[int, int]:
+    quote = first_text(raw_ref, "exact_text", "text", "quote", "excerpt")
+    if quote:
+        exact = content.find(quote)
+        if exact >= 0:
+            return exact, exact + len(quote)
+        fuzzy = fuzzy_span(content, quote)
+        if fuzzy:
+            return fuzzy
+
+    start = max(0, min(start_char, len(content)))
+    end = max(start, min(end_char, len(content)))
+    return start, end
+
+
+def first_text(raw: dict[str, Any], *keys: str) -> str | None:
+    for key in keys:
+        value = raw.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return None
+
+
+def fuzzy_span(content: str, quote: str) -> tuple[int, int] | None:
+    normalized_content, position_map = normalize_with_positions(content)
+    normalized_quote, _ = normalize_with_positions(quote)
+    if not normalized_content or not normalized_quote:
+        return None
+
+    exact = normalized_content.find(normalized_quote)
+    if exact >= 0:
+        return position_map[exact], position_map[exact + len(normalized_quote) - 1] + 1
+
+    quote_len = len(normalized_quote)
+    best: tuple[float, int, int] | None = None
+    step = max(1, quote_len // 8)
+    min_len = max(8, int(quote_len * 0.65))
+    max_len = max(min_len, int(quote_len * 1.35))
+    for window_len in range(min_len, max_len + 1, step):
+        for start in range(0, max(1, len(normalized_content) - window_len + 1), step):
+            window = normalized_content[start : start + window_len]
+            ratio = SequenceMatcher(None, normalized_quote, window).ratio()
+            if best is None or ratio > best[0]:
+                best = (ratio, start, start + window_len)
+
+    if best and best[0] >= 0.72:
+        _, start, end = best
+        return position_map[start], position_map[end - 1] + 1
+    return None
+
+
+def normalize_with_positions(text: str) -> tuple[str, list[int]]:
+    chars: list[str] = []
+    positions: list[int] = []
+    previous_space = False
+    for index, char in enumerate(text):
+        if char.isspace():
+            if chars and not previous_space:
+                chars.append(" ")
+                positions.append(index)
+            previous_space = True
+            continue
+        chars.append(char.lower())
+        positions.append(index)
+        previous_space = False
+    if chars and chars[-1] == " ":
+        chars.pop()
+        positions.pop()
+    return "".join(chars), positions
 
 
 def dedupe_items(items: list[KnowledgeItem]) -> list[KnowledgeItem]:

@@ -45,6 +45,13 @@ class ImporterTests(unittest.TestCase):
         self.assertEqual(thread.title, "Export")
         self.assertEqual(thread.messages[0].content, "Build ThreadSieve.")
 
+    def test_import_text_generic_speakers(self):
+        thread = import_text("Gemini: Try this approach.\nJamie: Nice, what next?", title="Generic")
+
+        self.assertEqual(len(thread.messages), 2)
+        self.assertEqual(thread.messages[0].role, "assistant")
+        self.assertEqual(thread.messages[1].role, "jamie")
+
 
 if __name__ == "__main__":
     unittest.main()

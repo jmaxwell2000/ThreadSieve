@@ -10,7 +10,7 @@ It is built to be boringly portable: plain Markdown notes, local source archives
 - `threadsieve ingest ./chat.json`
 - `threadsieve extract --thread latest`
 - `threadsieve extract --file ./thread.md`
-- `threadsieve extract --clipboard` on macOS
+- `threadsieve extract --clipboard`
 - `threadsieve search "knowledge management"`
 - `threadsieve open OBJECT_ID`
 - ChatGPT export JSON importer
@@ -61,7 +61,32 @@ Copy a chat transcript, then run:
 threadsieve extract --clipboard
 ```
 
-ThreadSieve uses macOS `pbpaste`; no clipboard package is required.
+ThreadSieve uses the native clipboard command when available:
+
+- macOS: `pbpaste`
+- Linux Wayland: `wl-paste`
+- Linux X11: `xclip` or `xsel`
+- Windows: PowerShell `Get-Clipboard`
+
+No Python clipboard package is required. If no clipboard tool is available, paste the transcript into a text file and run:
+
+```bash
+threadsieve extract --file ./thread.md
+```
+
+## Cross-Platform File Opening
+
+`threadsieve open OBJECT_ID` uses the native file opener:
+
+- macOS: `open`
+- Linux: `xdg-open`
+- Windows: `os.startfile`
+
+On any platform, this always works without a GUI:
+
+```bash
+threadsieve open OBJECT_ID --print
+```
 
 ## Use a Local Model Through Ollama
 

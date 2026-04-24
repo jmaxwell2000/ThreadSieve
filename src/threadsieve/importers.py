@@ -9,7 +9,8 @@ from .ids import stable_message_id, stable_thread_id
 from .models import Message, Thread, utc_now_iso
 
 
-ROLE_PATTERN = re.compile(r"^(user|assistant|system|human|ai|you|me|chatgpt|claude)\s*:\s*(.*)$", re.I)
+KNOWN_ROLE_PATTERN = re.compile(r"^(user|assistant|system|human|ai|you|me|chatgpt|claude|gemini|copilot|perplexity)\s*:\s*(.*)$", re.I)
+GENERIC_SPEAKER_PATTERN = re.compile(r"^([A-Za-z][A-Za-z0-9 _.-]{1,40})\s*:\s+(.*)$")
 
 
 def import_file(path: Path, source_app: str | None = None) -> Thread:
@@ -161,11 +162,12 @@ def build_messages(thread_id: str, raw_messages: list[dict[str, Any]]) -> list[M
 
 
 def parse_role_blocks(text: str) -> list[dict[str, str]]:
+    pattern = choose_role_pattern(text)
     blocks: list[dict[str, str]] = []
     current_role: str | None = None
     current_lines: list[str] = []
     for line in text.splitlines():
-        match = ROLE_PATTERN.match(line)
+        match = pattern.match(line)
         if match:
             if current_role and current_lines:
                 blocks.append({"role": normalize_role(current_role), "content": "\n".join(current_lines).strip()})
@@ -176,6 +178,42 @@ def parse_role_blocks(text: str) -> list[dict[str, str]]:
     if current_role and current_lines:
         blocks.append({"role": normalize_role(current_role), "content": "\n".join(current_lines).strip()})
     return [block for block in blocks if block["content"]]
+
+
+def choose_role_pattern(text: str) -> re.Pattern[str]:
+    generic_roles = []
+    for line in text.splitlines():
+        match = GENERIC_SPEAKER_PATTERN.match(line)
+        if not match:
+            continue
+        role = match.group(1).strip()
+        content = match.group(2).strip()
+        if content and not looks_like_metadata_label(role):
+            generic_roles.append(role.lower())
+    if len(set(generic_roles)) >= 2:
+        return GENERIC_SPEAKER_PATTERN
+
+    known_matches = [KNOWN_ROLE_PATTERN.match(line) for line in text.splitlines()]
+    if any(known_matches):
+        return KNOWN_ROLE_PATTERN
+    return KNOWN_ROLE_PATTERN
+
+
+def looks_like_metadata_label(label: str) -> bool:
+    normalized = label.strip().lower()
+    metadata_labels = {
+        "date",
+        "time",
+        "title",
+        "tags",
+        "source",
+        "url",
+        "note",
+        "summary",
+        "status",
+        "id",
+    }
+    return normalized in metadata_labels
 
 
 def extract_chatgpt_content(content: dict[str, Any]) -> str:
@@ -205,7 +243,17 @@ def infer_source_app(path: Path, raw: Any) -> str:
 
 def normalize_role(role: str) -> str:
     role = role.strip().lower()
-    return {"human": "user", "me": "user", "ai": "assistant", "chatgpt": "assistant", "claude": "assistant"}.get(role, role)
+    return {
+        "human": "user",
+        "me": "user",
+        "you": "user",
+        "ai": "assistant",
+        "chatgpt": "assistant",
+        "claude": "assistant",
+        "gemini": "assistant",
+        "copilot": "assistant",
+        "perplexity": "assistant",
+    }.get(role, role.replace(" ", "_"))
 
 
 def string_or_none(value: Any) -> str | None:

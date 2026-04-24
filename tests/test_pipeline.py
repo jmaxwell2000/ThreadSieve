@@ -5,7 +5,7 @@ import unittest
 import _bootstrap  # noqa: F401
 
 from threadsieve.archive import archive_thread
-from threadsieve.extractor import extract_items
+from threadsieve.extractor import extract_items, parse_model_json, repair_span
 from threadsieve.importers import import_text
 from threadsieve.index import index_object, index_thread, search
 from threadsieve.writer import write_item
@@ -31,6 +31,23 @@ class PipelineTests(unittest.TestCase):
             matches = search(tmp_path, "source")
             self.assertTrue(matches)
             self.assertEqual(matches[0]["local_path"], str(note_path))
+
+    def test_model_json_parses_markdown_fence(self):
+        parsed = parse_model_json('Sure:\n```json\n{"items": []}\n```')
+
+        self.assertEqual(parsed, {"items": []})
+
+    def test_span_repair_prefers_exact_text(self):
+        content = "Alpha beta gamma delta."
+        start, end = repair_span(content, {"exact_text": "gamma delta"}, 0, 5)
+
+        self.assertEqual(content[start:end], "gamma delta")
+
+    def test_span_repair_fuzzy_matches_whitespace(self):
+        content = "Alpha beta gamma\n  delta."
+        start, end = repair_span(content, {"exact_text": "gamma delta"}, 0, 5)
+
+        self.assertEqual(" ".join(content[start:end].split()), "gamma delta")
 
 
 if __name__ == "__main__":
