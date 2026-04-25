@@ -14,6 +14,9 @@ Supported item types: idea, task, decision, question, feature, insight, requirem
 Supported object_role values: durable_note, artifact_spec, revision, decision, raw_capture.
 Include origin as one of: user, assistant, mixed, unclear.
 Include evidence as short source excerpts when useful, not full transcripts.
+If the user provides a named protocol, framework, prompt, spec, mode, rubric, or set of directives, extract it as a complete structured artifact. Prefer type framework and object_role artifact_spec unless a more specific supported type clearly fits.
+For user-authored protocols/specs/directives, preserve every essential directive in summary, body, canonical_statement, evidence, and source_refs. Do not cite only the title or first lines.
+canonical_statement must be a durable proposition or compact full specification, not merely a title.
 Prefer the user's evolving thought process over assistant suggestions.
 Only save assistant-introduced ideas when the user clearly adopts, modifies, questions, or builds on them.
 When consecutive user messages refine the same artifact, preference, requirement, or conceptual object, merge them into one higher-value item with multiple source_refs. Emit separate items only when a later message introduces an independent object, a decision, a task, or a contradiction.

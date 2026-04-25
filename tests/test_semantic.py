@@ -5,7 +5,7 @@ import unittest
 import _bootstrap  # noqa: F401
 
 from threadsieve.importers import import_text
-from threadsieve.semantic import offline_semantic_log, thread_from_semantic_text, write_semantic_log
+from threadsieve.semantic import looks_like_artifact, offline_semantic_log, thread_from_semantic_text, write_semantic_log
 
 
 class SemanticLogTests(unittest.TestCase):
@@ -46,6 +46,16 @@ class SemanticLogTests(unittest.TestCase):
         self.assertIn("- CONTENT_EXCERPT:", semantic.text)
         self.assertIn("- CONTENT_HASH:", semantic.text)
         self.assertIn("Ask the user five preference questions", semantic.extraction_thread.messages[1].content)
+
+    def test_continue_examples_is_not_artifact_revision(self):
+        thread = import_text(
+            "User: Give examples.\n"
+            "Assistant: Example One: Weather status. Example Two: Schedule optimize.\n"
+            "User: Continue.",
+            title="Examples",
+        )
+
+        self.assertFalse(looks_like_artifact(thread.messages[1].content, thread.messages[2]))
 
     def test_write_semantic_log(self):
         thread = import_text("User: Preserve this.", title="Write Log")

@@ -10,6 +10,7 @@ from threadsieve.importers import import_text
 from threadsieve.index import index_object, index_thread, search
 from threadsieve.models import KnowledgeItem
 from threadsieve.pipeline import extract_sources, find_object_record, trace_object
+from threadsieve.prompts import DEFAULT_EXTRACT_PROMPT
 from threadsieve.writer import write_item
 
 
@@ -55,6 +56,8 @@ class PipelineTests(unittest.TestCase):
         payload = messages[-1]["content"]
         self.assertIn("canonical_statement", payload)
         self.assertIn("ref_type", payload)
+        self.assertIn("artifact_spec", payload)
+        self.assertIn("named protocol", DEFAULT_EXTRACT_PROMPT)
 
     def test_knowledge_item_accepts_extended_schema_fields(self):
         item = KnowledgeItem.from_dict(

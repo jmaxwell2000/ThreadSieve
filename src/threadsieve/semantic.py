@@ -330,7 +330,23 @@ def looks_like_artifact(content: str, next_user: Message | None) -> bool:
         "instead",
         "version",
         "prompt",
+        "accept",
+        "reject",
+        "critique",
     ]
+    continuation_only = {
+        "continue",
+        "yes, continue",
+        "continue.",
+        "continue to give examples",
+        "give me more examples",
+        "more examples",
+        "okay, what else?",
+    }
+    if next_lower.strip(" .") in continuation_only:
+        return False
+    if "example" in lower and any(phrase in next_lower for phrase in ["continue", "more examples", "what else"]):
+        return False
     has_artifact_shape = any(marker in lower for marker in artifact_markers) or len(content) > 700
     next_revises = any(marker in next_lower for marker in revision_markers)
     return has_artifact_shape and next_revises
