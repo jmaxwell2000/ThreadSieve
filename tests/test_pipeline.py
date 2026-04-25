@@ -97,6 +97,14 @@ class PipelineTests(unittest.TestCase):
 
         self.assertEqual(" ".join(content[start:end].split()), "gamma delta")
 
+    def test_span_repair_handles_quote_longer_than_content(self):
+        content = "short artifact"
+        start, end = repair_span(content, {"exact_text": "short artifact with extra model text"}, 0, len(content))
+
+        self.assertGreaterEqual(start, 0)
+        self.assertLessEqual(end, len(content))
+        self.assertGreaterEqual(end, start)
+
     def test_source_out_pipeline_writes_state_index_and_trace(self):
         with tempfile.TemporaryDirectory() as directory:
             tmp_path = Path(directory)

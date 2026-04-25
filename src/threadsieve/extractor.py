@@ -196,7 +196,8 @@ def fuzzy_span(content: str, quote: str) -> tuple[int, int] | None:
 
     exact = normalized_content.find(normalized_quote)
     if exact >= 0:
-        return position_map[exact], position_map[exact + len(normalized_quote) - 1] + 1
+        end_index = min(exact + len(normalized_quote) - 1, len(position_map) - 1)
+        return position_map[exact], position_map[end_index] + 1
 
     quote_len = len(normalized_quote)
     best: tuple[float, int, int] | None = None
@@ -212,7 +213,9 @@ def fuzzy_span(content: str, quote: str) -> tuple[int, int] | None:
 
     if best and best[0] >= 0.72:
         _, start, end = best
-        return position_map[start], position_map[end - 1] + 1
+        start_index = min(start, len(position_map) - 1)
+        end_index = min(max(start_index, end - 1), len(position_map) - 1)
+        return position_map[start_index], position_map[end_index] + 1
     return None
 
 
