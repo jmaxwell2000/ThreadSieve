@@ -1,0 +1,31 @@
+sources:
+  - ./incoming_chats
+
+output: ./knowledge
+
+provider:
+  name: openrouter
+  api_key_env: OPENROUTER_API_KEY
+  model: openai/gpt-4.1-mini
+
+prompts:
+  extract: ~/.threadsieve/prompts/extract.md
+  semantic: ~/.threadsieve/prompts/semantic.md
+
+extractors:
+  - idea
+  - task
+  - decision
+  - question
+  - feature
+  - insight
+  - requirement
+  - risk
+
+behavior:
+  skip_processed: true
+  needs_review_confidence_threshold: 0.75
+  overwrite_existing: false
+  write_index: true
+  dry_run: false
+  semantic_logs: true

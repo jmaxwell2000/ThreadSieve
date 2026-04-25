@@ -14,6 +14,13 @@ KNOWN_ROLE_PATTERN = re.compile(
     re.I,
 )
 GENERIC_SPEAKER_PATTERN = re.compile(r"^([A-Za-z][A-Za-z0-9 _.-]{1,40})\s*(?::|\s+-\s+)\s*(?:-\s*)?(.*)$")
+MARKDOWN_CHAT_HEADER_PATTERN = re.compile(
+    r"^#{2,6}\s+(User|Assistant|System|Tool|Human|AI|ChatGPT|Claude|Gemini|Copilot|Perplexity)"
+    r"(?:\s*\(([^)]*)\))?\s*$",
+    re.IGNORECASE | re.MULTILINE,
+)
+CHAT_ID_PATTERN = re.compile(r"^\*\*Chat ID:\*\*\s*(.+?)\s*$", re.IGNORECASE | re.MULTILINE)
+DATE_PATTERN = re.compile(r"^\*\*Date:\*\*\s*(.+?)\s*$", re.IGNORECASE | re.MULTILINE)
 
 
 def import_file(path: Path, source_app: str | None = None) -> Thread:
@@ -21,6 +28,9 @@ def import_file(path: Path, source_app: str | None = None) -> Thread:
     if path.suffix.lower() == ".json":
         raw = json.loads(text)
         return import_json(raw, source_app=source_app or infer_source_app(path, raw), source_uri=str(path))
+    parsed_markdown = import_markdown_chat(text, title=path.stem, source_app=source_app or "markdown_chat", source_uri=str(path))
+    if parsed_markdown:
+        return parsed_markdown
     return import_text(text, title=path.stem, source_app=source_app or "file", source_uri=str(path))
 
 
@@ -48,6 +58,56 @@ def import_text(text: str, title: str = "Pasted thread", source_app: str = "text
         created_at=utc_now_iso(),
         updated_at=utc_now_iso(),
         messages=messages,
+    )
+
+
+def import_markdown_chat(text: str, title: str, source_app: str = "markdown_chat", source_uri: str | None = None) -> Thread | None:
+    matches = list(MARKDOWN_CHAT_HEADER_PATTERN.finditer(text))
+    if not matches:
+        return None
+
+    chat_id = first_group(CHAT_ID_PATTERN, text)
+    date = first_group(DATE_PATTERN, text)
+    heading = first_markdown_heading(text) or title
+    thread_id = chat_id or stable_thread_id(source_app, title, text)
+    messages: list[Message] = []
+    for index, match in enumerate(matches):
+        content_start = match.end()
+        content_end = matches[index + 1].start() if index + 1 < len(matches) else len(text)
+        content = text[content_start:content_end].strip()
+        if not content:
+            continue
+        role = normalize_role(match.group(1))
+        timestamp = string_or_none(match.group(2))
+        message_id = stable_message_id(thread_id, index, role, f"{timestamp or ''}\n{content}")
+        messages.append(
+            Message(
+                id=message_id,
+                thread_id=thread_id,
+                role=role,
+                index=index,
+                content=content,
+                timestamp=timestamp,
+                metadata={
+                    "chat_id": chat_id,
+                    "date": date,
+                    "start_char": content_start,
+                    "end_char": content_end,
+                    "source_path": source_uri,
+                },
+            )
+        )
+    if not messages:
+        return None
+    return Thread(
+        id=thread_id,
+        source_app=source_app,
+        source_uri=source_uri,
+        title=heading,
+        created_at=date,
+        updated_at=utc_now_iso(),
+        messages=messages,
+        metadata={"chat_id": chat_id, "date": date},
     )
 
 
@@ -257,6 +317,16 @@ def normalize_role(role: str) -> str:
         "copilot": "assistant",
         "perplexity": "assistant",
     }.get(role, role.replace(" ", "_"))
+
+
+def first_group(pattern: re.Pattern[str], text: str) -> str | None:
+    match = pattern.search(text)
+    return match.group(1).strip() if match else None
+
+
+def first_markdown_heading(text: str) -> str | None:
+    match = re.search(r"^#\s+(.+?)\s*$", text, re.MULTILINE)
+    return match.group(1).strip() if match else None
 
 
 def string_or_none(value: Any) -> str | None:

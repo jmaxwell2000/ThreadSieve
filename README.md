@@ -10,6 +10,9 @@ It is built to be boringly portable: plain Markdown notes, local source archives
 - `threadsieve ingest ./chat.json`
 - `threadsieve extract --thread latest`
 - `threadsieve extract --file ./thread.md`
+- `threadsieve extract --source ./chats --out ./knowledge`
+- `threadsieve trace OBJECT_ID --knowledge ./knowledge`
+- `threadsieve index ./knowledge`
 - `threadsieve extract --clipboard`
 - `threadsieve search "knowledge management"`
 - `threadsieve open OBJECT_ID`
@@ -42,6 +45,36 @@ chmod +x bin/threadsieve
 ./bin/threadsieve init --workspace ~/ThreadSieve
 ./bin/threadsieve extract --file examples/thread.md
 ./bin/threadsieve search provenance
+```
+
+The handoff-style pipeline command writes directly to a user-chosen knowledge folder:
+
+```bash
+./bin/threadsieve extract --source examples/thread.md --out ./knowledge
+./bin/threadsieve trace OBJECT_ID --knowledge ./knowledge
+```
+
+Extraction now creates an intermediate semantic log by default. User messages are preserved verbatim as
+`USER_STATEMENT`, while assistant messages are compressed into `AI_CONTEXT` metadata. The extractor uses
+that log so user thought flow is treated as primary evidence and assistant ideas are only extracted when
+the user reacts to or develops them.
+
+Classic workspace mode writes logs here:
+
+```text
+~/ThreadSieve/Semantic Logs/
+```
+
+The `--source/--out` pipeline writes logs here:
+
+```text
+./knowledge/semantic_logs/
+```
+
+To bypass this stage:
+
+```bash
+threadsieve extract --file examples/thread.md --no-semantic-log
 ```
 
 If you do not want a virtual environment, use `pipx`:
@@ -122,6 +155,12 @@ threadsieve configure-provider openrouter --model openai/gpt-4o-mini
 threadsieve doctor
 threadsieve test-provider
 threadsieve extract --file examples/thread.md
+```
+
+For a project-local pipeline config, copy `threadsieve.example.yaml` to `threadsieve.yaml`, edit the paths/model, then run:
+
+```bash
+threadsieve extract --config threadsieve.yaml
 ```
 
 To make the key available in every new Terminal window, add it to your shell profile:
@@ -206,30 +245,39 @@ threadsieve test-provider
 
 ## Customize The Extraction Prompt
 
-ThreadSieve creates an editable extraction prompt when you run `init`.
+ThreadSieve creates editable prompts when you run `init`.
+
+There are two prompt kinds:
+
+- `extract`: controls idea, task, decision, product/project note extraction and the content that becomes Markdown notes.
+- `semantic`: controls the intermediate semantic log, where user statements are preserved and assistant replies become context metadata.
 
 Show the active prompt path and contents:
 
 ```bash
 threadsieve show-prompt
+threadsieve show-prompt --kind semantic
 ```
 
 Show only the path:
 
 ```bash
 threadsieve show-prompt --path-only
+threadsieve show-prompt --kind semantic --path-only
 ```
 
 On macOS, open the prompt in TextEdit:
 
 ```bash
 open "$(threadsieve show-prompt --path-only)"
+open "$(threadsieve show-prompt --kind semantic --path-only)"
 ```
 
 Or edit it in Terminal:
 
 ```bash
 nano "$(threadsieve show-prompt --path-only)"
+nano "$(threadsieve show-prompt --kind semantic --path-only)"
 ```
 
 The default prompt tells the model to return JSON only, extract fewer high-value objects, cite message IDs, include `exact_text` where possible, and avoid unsupported claims. After editing the prompt, run extraction normally:
@@ -242,6 +290,8 @@ Restore the default prompt:
 
 ```bash
 threadsieve reset-prompt --force
+threadsieve reset-prompt --kind semantic --force
+threadsieve reset-prompt --kind all --force
 ```
 
 ## Output Layout
@@ -262,6 +312,25 @@ threadsieve reset-prompt --force
         manifest.json
   objects.jsonl
   index.sqlite
+```
+
+The `--source/--out` pipeline layout is flatter and object-type first:
+
+```text
+knowledge/
+  ideas/
+  tasks/
+  decisions/
+  questions/
+  features/
+  insights/
+  requirements/
+  risks/
+  _needs_review/
+  semantic_logs/
+  _runs/
+  .threadsieve/state.json
+  index.jsonl
 ```
 
 Every note includes:

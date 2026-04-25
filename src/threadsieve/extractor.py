@@ -27,27 +27,15 @@ def extract_items(thread: Thread, model_config: dict[str, Any], threshold: float
 
 
 def offline_extract(thread: Thread) -> list[dict[str, Any]]:
-    """Deterministic local fallback so the CLI works before a model is configured."""
+    """Deterministic smoke-test fallback.
+
+    Offline mode is intentionally conservative. It should prove that parsing,
+    provenance, and file writing work, but it should not pretend to perform
+    semantic extraction.
+    """
     text = "\n\n".join(f"{message.role}: {message.content}" for message in thread.messages)
     tags = infer_tags(text)
     items: list[dict[str, Any]] = []
-    if thread.messages:
-        first_ref = {
-            "message_id": thread.messages[0].id,
-            "start_char": 0,
-            "end_char": min(len(thread.messages[0].content), 1200),
-        }
-        items.append(
-            {
-                "type": "project_note",
-                "title": thread.title,
-                "summary": summarize_text(text),
-                "body": "Offline extraction captured this as a source-linked project note. Configure an OpenAI-compatible provider for richer typed extraction.",
-                "tags": tags,
-                "source_refs": [first_ref],
-                "confidence": 0.62,
-            }
-        )
     questions = find_question_items(thread, tags)
     items.extend(questions[:5])
     return items
@@ -107,11 +95,13 @@ def extraction_payload(thread: Thread) -> dict[str, Any]:
         "schema": {
             "items": [
                 {
-                    "type": "idea | decision | open_loop | question | task | draft | product_concept | technical_pattern | research_lead | project_note | framework",
+                    "type": "idea | task | decision | question | feature | insight | requirement | risk | open_loop | draft | product_concept | technical_pattern | research_lead | project_note | framework",
                     "title": "short durable title",
                     "summary": "grounded summary",
                     "body": "optional useful detail",
                     "tags": ["stable", "reusable", "tags"],
+                    "origin": "user | assistant | mixed | unclear",
+                    "evidence": ["short excerpt from the source"],
                     "source_refs": [{"message_id": "msg_id", "start_char": 0, "end_char": 120, "exact_text": "cited text"}],
                     "confidence": 0.0,
                 }
@@ -276,6 +266,8 @@ def infer_tags(text: str) -> list[str]:
 def find_question_items(thread: Thread, fallback_tags: list[str]) -> list[dict[str, Any]]:
     items: list[dict[str, Any]] = []
     for message in thread.messages:
+        if message.role != "user":
+            continue
         for match in re.finditer(r"([^?\n]{12,}\?)", message.content):
             question = " ".join(match.group(1).split())
             items.append(
@@ -284,6 +276,8 @@ def find_question_items(thread: Thread, fallback_tags: list[str]) -> list[dict[s
                     "title": question[:90],
                     "summary": question,
                     "tags": fallback_tags[:5],
+                    "origin": message.role if message.role in {"user", "assistant"} else "unclear",
+                    "evidence": [question],
                     "source_refs": [
                         {
                             "message_id": message.id,

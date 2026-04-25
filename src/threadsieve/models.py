@@ -64,6 +64,12 @@ class SourceRef:
     message_id: str
     start_char: int
     end_char: int
+    source_id: str | None = None
+    source_path: str | None = None
+    chat_id: str | None = None
+    role: str | None = None
+    timestamp: str | None = None
+    granularity: str = "message"
 
     @classmethod
     def from_dict(cls, raw: dict[str, Any]) -> "SourceRef":
@@ -71,14 +77,32 @@ class SourceRef:
             message_id=str(raw.get("message_id", "")),
             start_char=int(raw.get("start_char", 0)),
             end_char=int(raw.get("end_char", 0)),
+            source_id=string_or_none(raw.get("source_id")),
+            source_path=string_or_none(raw.get("source_path")),
+            chat_id=string_or_none(raw.get("chat_id")),
+            role=string_or_none(raw.get("role")),
+            timestamp=string_or_none(raw.get("timestamp")),
+            granularity=str(raw.get("granularity") or "message"),
         )
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        data = {
             "message_id": self.message_id,
             "start_char": self.start_char,
             "end_char": self.end_char,
         }
+        optional = {
+            "source_id": self.source_id,
+            "source_path": self.source_path,
+            "chat_id": self.chat_id,
+            "role": self.role,
+            "timestamp": self.timestamp,
+            "granularity": self.granularity,
+        }
+        for key, value in optional.items():
+            if value is not None:
+                data[key] = value
+        return data
 
 
 @dataclass(frozen=True)
@@ -93,6 +117,10 @@ class KnowledgeItem:
     body: str | None = None
     status: str = "raw"
     created_at: str = field(default_factory=utc_now_iso)
+    updated_at: str | None = None
+    origin: str = "unclear"
+    evidence: list[str] = field(default_factory=list)
+    generated_by: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
     def from_dict(cls, raw: dict[str, Any], item_id: str) -> "KnowledgeItem":
@@ -108,6 +136,10 @@ class KnowledgeItem:
             confidence=float(raw.get("confidence", 0.0)),
             body=str(body).strip() if body else None,
             status=str(raw.get("status", "raw")),
+            updated_at=string_or_none(raw.get("updated_at")),
+            origin=normalize_origin(str(raw.get("origin", "unclear"))),
+            evidence=normalize_evidence(raw.get("evidence") or []),
+            generated_by=dict(raw.get("generated_by") or {}),
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -122,6 +154,10 @@ class KnowledgeItem:
             "body": self.body,
             "status": self.status,
             "created_at": self.created_at,
+            "updated_at": self.updated_at or self.created_at,
+            "origin": self.origin,
+            "evidence": self.evidence,
+            "generated_by": self.generated_by,
         }
 
 
@@ -131,6 +167,10 @@ TYPE_DIRS = {
     "open_loop": "Open Loops",
     "question": "Questions",
     "task": "Tasks",
+    "feature": "Features",
+    "insight": "Insights",
+    "requirement": "Requirements",
+    "risk": "Risks",
     "draft": "Drafts",
     "product_concept": "Product Concepts",
     "technical_pattern": "Technical Patterns",
@@ -162,6 +202,27 @@ def normalize_tags(raw_tags: list[Any]) -> list[str]:
     return tags[:12]
 
 
+def normalize_origin(value: str) -> str:
+    normalized = value.strip().lower().replace("-", "_").replace(" ", "_")
+    return normalized if normalized in {"user", "assistant", "mixed", "unclear"} else "unclear"
+
+
+def normalize_evidence(raw_evidence: list[Any]) -> list[str]:
+    evidence: list[str] = []
+    for item in raw_evidence:
+        text = str(item).strip()
+        if text and text not in evidence:
+            evidence.append(text[:1200])
+    return evidence[:8]
+
+
 def clean_title(title: str) -> str:
     title = " ".join(title.split())
     return title[:120] if title else "Untitled"
+
+
+def string_or_none(value: Any) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None

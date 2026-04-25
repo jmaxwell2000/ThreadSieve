@@ -7,11 +7,38 @@ from .ids import slugify
 from .models import KnowledgeItem, TYPE_DIRS, Thread
 
 
-def write_item(workspace: Path, item: KnowledgeItem, thread: Thread, source_dir: Path) -> Path:
+PIPELINE_TYPE_DIRS = {
+    "idea": "ideas",
+    "task": "tasks",
+    "decision": "decisions",
+    "question": "questions",
+    "feature": "features",
+    "insight": "insights",
+    "requirement": "requirements",
+    "risk": "risks",
+}
+
+
+def write_item(workspace: Path, item: KnowledgeItem, thread: Thread, source_dir: Path, overwrite: bool = False) -> Path:
     directory = workspace / "Knowledge" / TYPE_DIRS.get(item.type, "Ideas")
     directory.mkdir(parents=True, exist_ok=True)
     path = directory / f"{item.id}-{slugify(item.title)}.md"
+    if path.exists() and not overwrite:
+        raise FileExistsError(f"Refusing to overwrite existing note: {path}")
     path.write_text(render_item_markdown(item, thread, source_dir), encoding="utf-8")
+    return path
+
+
+def write_pipeline_item(output_root: Path, item: KnowledgeItem, thread: Thread, needs_review: bool, overwrite: bool = False) -> Path:
+    if needs_review:
+        directory = output_root / "_needs_review"
+    else:
+        directory = output_root / PIPELINE_TYPE_DIRS.get(item.type, f"{slugify(item.type)}s")
+    directory.mkdir(parents=True, exist_ok=True)
+    path = directory / f"{item.id}.md"
+    if path.exists() and not overwrite:
+        raise FileExistsError(f"Refusing to overwrite existing note: {path}")
+    path.write_text(render_pipeline_item_markdown(item, thread), encoding="utf-8")
     return path
 
 
@@ -41,6 +68,10 @@ def render_item_markdown(item: KnowledgeItem, thread: Thread, source_dir: Path) 
             "source_url": thread.source_uri,
             "message_refs": [ref.to_dict() for ref in item.source_refs],
         },
+        "updated_at": item.updated_at or item.created_at,
+        "origin": item.origin,
+        "evidence": item.evidence,
+        "generated_by": item.generated_by,
     }
     lines = ["---", to_yaml_like(frontmatter).rstrip(), "---", "", f"# {item.title}", ""]
     lines.extend(["## Summary", "", item.summary.strip() or "No summary provided.", ""])
@@ -55,6 +86,34 @@ def render_item_markdown(item: KnowledgeItem, thread: Thread, source_dir: Path) 
             lines.extend(["", f"### `{label}`", "", blockquote(excerpt[:1200] or message.content[:1200])])
         else:
             lines.append(f"- `{label}`")
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def render_pipeline_item_markdown(item: KnowledgeItem, thread: Thread) -> str:
+    frontmatter = item.to_dict()
+    frontmatter["source"] = {
+        "app": thread.source_app,
+        "thread_id": thread.id,
+        "thread_title": thread.title,
+        "source_uri": thread.source_uri,
+        "chat_id": thread.metadata.get("chat_id") if isinstance(thread.metadata, dict) else None,
+    }
+    lines = ["---", to_yaml_like(frontmatter).rstrip(), "---", "", f"# {item.title}", ""]
+    lines.extend(["## Summary", "", item.summary.strip() or "No summary provided.", ""])
+    if item.body:
+        lines.extend(["## Details", "", item.body.strip(), ""])
+    if item.evidence:
+        lines.extend(["## Evidence", ""])
+        for evidence in item.evidence:
+            lines.extend([blockquote(evidence), ""])
+    lines.extend(["## Source References", ""])
+    for ref in item.source_refs:
+        label = f"{ref.message_id}:{ref.start_char}-{ref.end_char}"
+        lines.append(f"- `{label}`")
+        if ref.source_path:
+            lines.append(f"  - Source: {ref.source_path}")
+        if ref.role or ref.timestamp:
+            lines.append(f"  - Message: {ref.role or 'unknown'} {ref.timestamp or ''}".rstrip())
     return "\n".join(lines).rstrip() + "\n"
 
 

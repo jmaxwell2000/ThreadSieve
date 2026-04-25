@@ -55,10 +55,60 @@ class ProviderTests(unittest.TestCase):
 
             config = load_config(str(config_path))
             prompt_path = ensure_default_prompt(config)
+            semantic_prompt_path = ensure_default_prompt(config, "semantic")
 
             self.assertEqual(result, 0)
             self.assertTrue(prompt_path.exists())
+            self.assertTrue(semantic_prompt_path.exists())
             self.assertIn("Return JSON only", prompt_path.read_text(encoding="utf-8"))
+            self.assertIn("USER_STATEMENT", semantic_prompt_path.read_text(encoding="utf-8"))
+
+    def test_show_and_reset_semantic_prompt(self):
+        with tempfile.TemporaryDirectory() as directory:
+            config_path = Path(directory) / "config.json"
+            with redirect_stdout(StringIO()):
+                main(["--config", str(config_path), "init", "--workspace", str(Path(directory) / "workspace")])
+
+            config = load_config(str(config_path))
+            semantic_prompt = ensure_default_prompt(config, "semantic")
+            semantic_prompt.write_text("custom semantic prompt", encoding="utf-8")
+
+            shown = StringIO()
+            with redirect_stdout(shown):
+                result = main(["--config", str(config_path), "show-prompt", "--kind", "semantic"])
+            self.assertEqual(result, 0)
+            self.assertIn("custom semantic prompt", shown.getvalue())
+
+            with redirect_stdout(StringIO()):
+                result = main(["--config", str(config_path), "reset-prompt", "--kind", "semantic", "--force"])
+            self.assertEqual(result, 0)
+            self.assertIn("USER_STATEMENT", semantic_prompt.read_text(encoding="utf-8"))
+
+    def test_yaml_config_loads_sources_output_and_provider_name(self):
+        with tempfile.TemporaryDirectory() as directory:
+            config_path = Path(directory) / "threadsieve.yaml"
+            config_path.write_text(
+                """sources:
+  - ./chats
+output: ./knowledge
+provider:
+  name: openrouter
+  model: openai/gpt-4.1-mini
+extractors:
+  - idea
+  - task
+behavior:
+  needs_review_confidence_threshold: 0.75
+""",
+                encoding="utf-8",
+            )
+
+            config = load_config(str(config_path))
+
+        self.assertEqual(config.raw["sources"], ["./chats"])
+        self.assertEqual(config.raw["output"], "./knowledge")
+        self.assertEqual(config.raw["provider"]["name"], "openrouter")
+        self.assertEqual(config.raw["extractors"], ["idea", "task"])
 
 
 if __name__ == "__main__":
