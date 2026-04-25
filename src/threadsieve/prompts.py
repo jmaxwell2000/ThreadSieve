@@ -22,25 +22,42 @@ Include canonical_statement for durable propositions or specifications.
 Include extraction_rationale explaining why the object exists, especially when it merges multiple turns.
 """
 
-DEFAULT_SEMANTIC_PROMPT = """You are processing a transcript of a conversation to prepare it for long-term semantic memory extraction.
-Your goal is to preserve the user's exact words while compressing the AI's responses into dense, high-signal metadata.
+DEFAULT_SEMANTIC_PROMPT = """You are converting a conversation into a semantic log for later memory extraction.
 
-Instructions:
-1. Preserve every user message verbatim, labeled as USER_STATEMENT:.
-2. If an assistant message contains a draft, prompt, schema, plan, code block, list of requirements, or other artifact that the next user message edits, accepts, rejects, extends, or refers to, label it AI_ARTIFACT instead of AI_CONTEXT.
-3. Replace ordinary AI messages with a structured block labeled AI_CONTEXT:.
-4. Do not write narrative summaries for AI_CONTEXT.
-5. Use brief, comma-separated keywords and active verbs.
-6. Read the next user message before writing NEXT_USER_REACTION so the user's logical next move is easy to follow.
+Your job:
+- Preserve the user's actual words.
+- Compress ordinary assistant replies.
+- Preserve assistant-generated artifacts when the user is revising or building on them.
 
-Format each AI_CONTEXT block strictly as:
-- ACTION: 1-3 words describing the rhetorical move the AI made.
-- CONCEPTS_INTRODUCED: Keywords only. Specific terminology, facts, or ideas the AI brought into the space.
+Use three block types:
+
+1. USER_STATEMENT
+Use this for every user message. Preserve the user's message verbatim.
+
+2. AI_CONTEXT
+Use this for ordinary assistant replies that only provide context, explanation, suggestions, examples, or framing.
+
+3. AI_ARTIFACT
+Some assistant messages are artifacts the user is working on. Use AI_ARTIFACT when the assistant produced something like:
+- a prompt
+- a plan
+- a schema
+- code
+- a checklist
+- a product spec
+- a requirements list
+- a draft document
+
+If the next user message edits, critiques, accepts, rejects, expands, or refers back to the assistant's artifact, use AI_ARTIFACT instead of AI_CONTEXT.
+
+AI_CONTEXT format:
+- ACTION: 1-3 words describing the assistant's conversational move.
+- CONCEPTS_INTRODUCED: Keywords only. Specific terminology, facts, or ideas the assistant brought into the conversation.
 - NEXT_USER_REF: message_id of the next user message, or none.
-- NEXT_USER_REACTION: One sentence fragment explaining what part of the AI message the user reacts to.
+- NEXT_USER_REACTION: One sentence fragment explaining what part of the assistant message the user reacts to.
 
-Format each AI_ARTIFACT block strictly as:
-- ARTIFACT_TYPE: prompt | schema | draft | code | plan | list | other
+AI_ARTIFACT format:
+- ARTIFACT_TYPE: prompt | schema | draft | code | plan | list | product_spec | requirements | other
 - ACTION: 1-3 words describing what the assistant produced.
 - CONTENT_EXCERPT: Smallest sufficient excerpt needed to understand the user's next move.
 - CONTENT_HASH: Stable short hash of the full assistant artifact if available.
