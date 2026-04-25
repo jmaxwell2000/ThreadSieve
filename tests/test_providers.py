@@ -10,7 +10,7 @@ import _bootstrap  # noqa: F401
 from threadsieve.cli import main
 from threadsieve.config import load_config
 from threadsieve.prompts import ensure_default_prompt
-from threadsieve.providers import build_provider, provider_status
+from threadsieve.providers import build_provider, provider_status, response_message_content
 
 
 class ProviderTests(unittest.TestCase):
@@ -36,6 +36,19 @@ class ProviderTests(unittest.TestCase):
 
         self.assertTrue(status["api_key_loaded"])
         self.assertNotIn("secret", str(status))
+
+    def test_response_message_content_reports_empty_choices(self):
+        with self.assertRaisesRegex(RuntimeError, "extraction request returned no choices"):
+            response_message_content({"choices": []}, "extraction request")
+
+    def test_response_message_content_reports_provider_error(self):
+        with self.assertRaisesRegex(RuntimeError, "semantic log request failed: bad model"):
+            response_message_content({"error": {"message": "bad model"}}, "semantic log request")
+
+    def test_response_message_content_extracts_text(self):
+        content = response_message_content({"choices": [{"message": {"content": "ok"}}]}, "test")
+
+        self.assertEqual(content, "ok")
 
     def test_configure_provider_command_writes_preset(self):
         with tempfile.TemporaryDirectory() as directory:

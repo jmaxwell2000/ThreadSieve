@@ -163,6 +163,55 @@ def fetch_json(request: urllib.request.Request, timeout: float) -> dict[str, Any
         raise RuntimeError(f"Provider request failed: {exc}") from exc
 
 
+def response_message_content(response_data: dict[str, Any], operation: str = "provider request") -> str:
+    """Return OpenAI-compatible message content or raise a useful provider error."""
+    if isinstance(response_data.get("error"), dict):
+        error = response_data["error"]
+        message = error.get("message") or error.get("code") or json.dumps(error, ensure_ascii=False)
+        raise RuntimeError(f"{operation} failed: {message}")
+
+    choices = response_data.get("choices")
+    if not isinstance(choices, list) or not choices:
+        raise RuntimeError(f"{operation} returned no choices. Response preview: {response_preview(response_data)}")
+
+    first = choices[0]
+    if not isinstance(first, dict):
+        raise RuntimeError(f"{operation} returned an invalid choice. Response preview: {response_preview(response_data)}")
+
+    message = first.get("message")
+    content: Any = None
+    if isinstance(message, dict):
+        content = message.get("content")
+    if content is None:
+        content = first.get("text")
+
+    if isinstance(content, str) and content.strip():
+        return content
+    if isinstance(content, list):
+        parts = []
+        for part in content:
+            if isinstance(part, str):
+                parts.append(part)
+            elif isinstance(part, dict) and isinstance(part.get("text"), str):
+                parts.append(part["text"])
+        joined = "\n".join(parts).strip()
+        if joined:
+            return joined
+
+    finish_reason = first.get("finish_reason")
+    if finish_reason:
+        raise RuntimeError(f"{operation} returned empty content with finish_reason={finish_reason}. Response preview: {response_preview(response_data)}")
+    raise RuntimeError(f"{operation} returned no message content. Response preview: {response_preview(response_data)}")
+
+
+def response_preview(response_data: dict[str, Any], limit: int = 800) -> str:
+    try:
+        text = json.dumps(response_data, ensure_ascii=False, sort_keys=True)
+    except TypeError:
+        text = str(response_data)
+    return " ".join(text.split())[:limit]
+
+
 def merge_dicts(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
     merged = json.loads(json.dumps(base))
     for key, value in override.items():

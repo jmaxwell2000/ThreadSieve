@@ -9,7 +9,7 @@ from typing import Any
 from .ids import stable_item_id
 from .models import KnowledgeItem, SourceRef, Thread
 from .prompts import DEFAULT_EXTRACT_PROMPT
-from .providers import build_provider, fetch_json, provider_request
+from .providers import build_provider, fetch_json, provider_request, response_message_content
 
 
 RESPONSE_FORMAT_PROTOCOL_PROMPT = """ThreadSieve protocol requirement:
@@ -50,7 +50,7 @@ def openai_compatible_extract(thread: Thread, model_config: dict[str, Any], syst
     )
     response_data = fetch_json(request, timeout=provider.timeout_seconds)
 
-    content = response_data["choices"][0]["message"]["content"]
+    content = response_message_content(response_data, "extraction request")
     parsed = parse_model_json(content)
     if isinstance(parsed, dict):
         return list(parsed.get("items") or [])

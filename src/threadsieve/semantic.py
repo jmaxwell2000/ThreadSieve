@@ -9,7 +9,7 @@ from typing import Any
 from .ids import short_hash, slugify
 from .models import Message, Thread, utc_now_iso
 from .prompts import DEFAULT_SEMANTIC_PROMPT
-from .providers import build_provider, fetch_json, provider_request
+from .providers import build_provider, fetch_json, provider_request, response_message_content
 
 
 EXTRACTION_FROM_SEMANTIC_LOG_PROMPT = """ThreadSieve extraction priority:
@@ -36,10 +36,7 @@ def build_semantic_log(thread: Thread, model_config: dict[str, Any], semantic_pr
     provider = build_provider(model_config)
     if provider.kind == "offline" or provider.name in {"offline", "none", "heuristic"}:
         return offline_semantic_log(thread)
-    try:
-        text = model_semantic_log(thread, model_config, semantic_prompt or DEFAULT_SEMANTIC_PROMPT)
-    except Exception:
-        return offline_semantic_log(thread)
+    text = model_semantic_log(thread, model_config, semantic_prompt or DEFAULT_SEMANTIC_PROMPT)
     return SemanticLog(text=text, extraction_thread=thread_from_semantic_text(thread, text))
 
 
@@ -111,7 +108,7 @@ def model_semantic_log(thread: Thread, model_config: dict[str, Any], semantic_pr
         ],
     )
     response_data = fetch_json(request, timeout=provider.timeout_seconds)
-    content = response_data["choices"][0]["message"]["content"]
+    content = response_message_content(response_data, "semantic log request")
     return normalize_semantic_log_text(thread, content)
 
 
