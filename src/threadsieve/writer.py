@@ -74,6 +74,8 @@ def render_item_markdown(item: KnowledgeItem, thread: Thread, source_dir: Path) 
         "generated_by": item.generated_by,
     }
     lines = ["---", to_yaml_like(frontmatter).rstrip(), "---", "", f"# {item.title}", ""]
+    if item.canonical_statement:
+        lines.extend(["## Canonical Statement", "", item.canonical_statement.strip(), ""])
     lines.extend(["## Summary", "", item.summary.strip() or "No summary provided.", ""])
     if item.body:
         lines.extend(["## Details", "", item.body.strip(), ""])
@@ -106,6 +108,8 @@ def render_pipeline_item_markdown(item: KnowledgeItem, thread: Thread) -> str:
         lines.extend(["## Evidence", ""])
         for evidence in item.evidence:
             lines.extend([blockquote(evidence), ""])
+    if item.extraction_rationale:
+        lines.extend(["## Extraction Rationale", "", item.extraction_rationale.strip(), ""])
     lines.extend(["## Source References", ""])
     for ref in item.source_refs:
         label = f"{ref.message_id}:{ref.start_char}-{ref.end_char}"

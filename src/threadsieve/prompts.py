@@ -11,10 +11,15 @@ Every item must be grounded in source_refs using message IDs from the input.
 When possible, include exact_text on each source_ref so spans can be repaired if character offsets are wrong.
 Do not invent facts that are not supported by cited messages.
 Supported item types: idea, task, decision, question, feature, insight, requirement, risk, open_loop, draft, product_concept, technical_pattern, research_lead, project_note, framework.
+Supported object_role values: durable_note, artifact_spec, revision, decision, raw_capture.
 Include origin as one of: user, assistant, mixed, unclear.
 Include evidence as short source excerpts when useful, not full transcripts.
 Prefer the user's evolving thought process over assistant suggestions.
 Only save assistant-introduced ideas when the user clearly adopts, modifies, questions, or builds on them.
+When consecutive user messages refine the same artifact, preference, requirement, or conceptual object, merge them into one higher-value item with multiple source_refs. Emit separate items only when a later message introduces an independent object, a decision, a task, or a contradiction.
+If the user edits or constrains an assistant-generated artifact, extract the user's adopted or modified specification, not merely the individual edit instruction. Include assistant source_refs only when necessary to identify the artifact under revision. Set origin to mixed when the durable object depends on assistant-generated wording but user-directed modifications define its meaning.
+Include canonical_statement for durable propositions or specifications.
+Include extraction_rationale explaining why the object exists, especially when it merges multiple turns.
 """
 
 DEFAULT_SEMANTIC_PROMPT = """You are processing a transcript of a conversation to prepare it for long-term semantic memory extraction.
@@ -22,15 +27,25 @@ Your goal is to preserve the user's exact words while compressing the AI's respo
 
 Instructions:
 1. Preserve every user message verbatim, labeled as USER_STATEMENT:.
-2. Replace the AI's messages with a structured block labeled AI_CONTEXT:.
-3. Do not write narrative summaries for AI_CONTEXT.
-4. Use brief, comma-separated keywords and active verbs.
-5. Read the next user message before writing BRIDGE so the user's logical next move is easy to follow.
+2. If an assistant message contains a draft, prompt, schema, plan, code block, list of requirements, or other artifact that the next user message edits, accepts, rejects, extends, or refers to, label it AI_ARTIFACT instead of AI_CONTEXT.
+3. Replace ordinary AI messages with a structured block labeled AI_CONTEXT:.
+4. Do not write narrative summaries for AI_CONTEXT.
+5. Use brief, comma-separated keywords and active verbs.
+6. Read the next user message before writing NEXT_USER_REACTION so the user's logical next move is easy to follow.
 
 Format each AI_CONTEXT block strictly as:
 - ACTION: 1-3 words describing the rhetorical move the AI made.
 - CONCEPTS_INTRODUCED: Keywords only. Specific terminology, facts, or ideas the AI brought into the space.
-- BRIDGE: One sentence fragment stating exactly what the next user message is reacting to.
+- NEXT_USER_REF: message_id of the next user message, or none.
+- NEXT_USER_REACTION: One sentence fragment explaining what part of the AI message the user reacts to.
+
+Format each AI_ARTIFACT block strictly as:
+- ARTIFACT_TYPE: prompt | schema | draft | code | plan | list | other
+- ACTION: 1-3 words describing what the assistant produced.
+- CONTENT_EXCERPT: Smallest sufficient excerpt needed to understand the user's next move.
+- CONTENT_HASH: Stable short hash of the full assistant artifact if available.
+- NEXT_USER_REF: message_id of the next user message, or none.
+- NEXT_USER_REACTION: Exact explanation of how the next user statement reacts to this artifact.
 
 Return only the semantic log. Keep message IDs in headings exactly as provided.
 """

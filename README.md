@@ -59,6 +59,11 @@ Extraction now creates an intermediate semantic log by default. User messages ar
 that log so user thought flow is treated as primary evidence and assistant ideas are only extracted when
 the user reacts to or develops them.
 
+When an assistant response contains a revisable artifact such as a prompt, schema, draft, code block, plan,
+or requirements list, the semantic log can preserve the needed excerpt as `AI_ARTIFACT` instead of compressing
+it away. This helps extraction merge refinement chains into one durable object rather than creating one note
+per user edit.
+
 Classic workspace mode writes logs here:
 
 ```text
@@ -337,6 +342,8 @@ Every note includes:
 
 - object ID
 - type
+- object role
+- canonical statement, when the extractor can form one
 - tags
 - confidence
 - source app
@@ -344,6 +351,7 @@ Every note includes:
 - local archived thread path
 - message IDs
 - character spans
+- typed source references, when available
 
 ## Import Formats
 

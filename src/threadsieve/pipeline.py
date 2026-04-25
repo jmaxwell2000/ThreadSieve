@@ -212,6 +212,7 @@ def enrich_ref(ref: SourceRef, thread: Thread, source_path: Path) -> SourceRef:
         granularity="message" if start == 0 and end >= len(message.content) else "span",
         start_char=start,
         end_char=end,
+        ref_type=ref.ref_type,
     )
 
 

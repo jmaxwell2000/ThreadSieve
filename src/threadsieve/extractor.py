@@ -99,10 +99,24 @@ def extraction_payload(thread: Thread) -> dict[str, Any]:
                     "title": "short durable title",
                     "summary": "grounded summary",
                     "body": "optional useful detail",
+                    "object_role": "durable_note | artifact_spec | revision | decision | raw_capture",
+                    "canonical_statement": "stable proposition or durable specification",
+                    "parent_object_id": "optional parent object id or null",
+                    "supersedes": ["optional prior item ids"],
+                    "extraction_rationale": "why this object exists, especially if merged from multiple turns",
+                    "thread_position": {"first_message_index": 0, "last_message_index": 2},
                     "tags": ["stable", "reusable", "tags"],
                     "origin": "user | assistant | mixed | unclear",
                     "evidence": ["short excerpt from the source"],
-                    "source_refs": [{"message_id": "msg_id", "start_char": 0, "end_char": 120, "exact_text": "cited text"}],
+                    "source_refs": [
+                        {
+                            "message_id": "msg_id",
+                            "start_char": 0,
+                            "end_char": 120,
+                            "exact_text": "cited text",
+                            "ref_type": "evidence | initial_request | revision_instruction | assistant_artifact | adoption | rejection | expansion_requirement",
+                        }
+                    ],
                     "confidence": 0.0,
                 }
             ]
@@ -134,7 +148,10 @@ def validate_items(thread: Thread, raw_items: list[dict[str, Any]], threshold: f
             if not message:
                 continue
             start, end = repair_span(message.content, ref, source_ref.start_char, source_ref.end_char)
-            refs.append({"message_id": source_ref.message_id, "start_char": start, "end_char": end})
+            repaired_ref = {"message_id": source_ref.message_id, "start_char": start, "end_char": end}
+            if source_ref.ref_type:
+                repaired_ref["ref_type"] = source_ref.ref_type
+            refs.append(repaired_ref)
         if not refs:
             continue
         raw = dict(raw)

@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from .ids import slugify
+from .ids import short_hash, slugify
 from .models import Message, Thread, utc_now_iso
 from .prompts import DEFAULT_SEMANTIC_PROMPT
 from .providers import build_provider, fetch_json, provider_request
@@ -16,10 +16,13 @@ EXTRACTION_FROM_SEMANTIC_LOG_PROMPT = """ThreadSieve extraction priority:
 You are reading a semantic log, not a raw transcript.
 Treat USER_STATEMENT content as primary evidence and the user's evolving thought process as the main object of extraction.
 Treat AI_CONTEXT content as scaffolding only: it explains what the user was reacting to.
+Treat AI_ARTIFACT content as a revisable artifact only when the user accepts, rejects, edits, extends, or refers to it.
 Prefer user-originated ideas, questions, requirements, decisions, and tasks.
 Do not extract an assistant-originated idea unless the user explicitly adopts, modifies, questions, or builds on it.
 When citing source_refs, prefer user message IDs. Use assistant message IDs only when the assistant context itself is essential evidence.
 Set origin to user when the durable object comes from the user's words, mixed when the user develops an assistant-introduced concept, assistant only when the saved object is intentionally about an assistant contribution.
+When consecutive user turns refine the same artifact, preference, requirement, or conceptual object, merge them into one higher-value item with multiple source_refs.
+If a user edits an AI_ARTIFACT, extract the resulting user-directed specification rather than the isolated edit instruction.
 """
 
 
@@ -50,11 +53,29 @@ def offline_semantic_log(thread: Thread) -> SemanticLog:
             continue
 
         next_user = next_user_message(thread.messages, index)
-        action = infer_action(message.content)
-        concepts = ", ".join(infer_concepts(message.content))
-        bridge = infer_bridge(next_user)
-        context = f"- ACTION: {action}\n- CONCEPTS_INTRODUCED: {concepts}\n- BRIDGE: {bridge}"
-        lines.extend([f"## {message.id} AI_CONTEXT", "", "AI_CONTEXT:", context, ""])
+        next_ref = next_user.id if next_user else "none"
+        reaction = infer_reaction(next_user)
+        if looks_like_artifact(message.content, next_user):
+            context = (
+                f"- ARTIFACT_TYPE: {infer_artifact_type(message.content)}\n"
+                f"- ACTION: {infer_artifact_action(message.content)}\n"
+                f"- CONTENT_EXCERPT: {artifact_excerpt(message.content)}\n"
+                f"- CONTENT_HASH: {short_hash(message.content, 12)}\n"
+                f"- NEXT_USER_REF: {next_ref}\n"
+                f"- NEXT_USER_REACTION: {reaction}"
+            )
+            label = "AI_ARTIFACT"
+        else:
+            action = infer_action(message.content)
+            concepts = ", ".join(infer_concepts(message.content))
+            context = (
+                f"- ACTION: {action}\n"
+                f"- CONCEPTS_INTRODUCED: {concepts}\n"
+                f"- NEXT_USER_REF: {next_ref}\n"
+                f"- NEXT_USER_REACTION: {reaction}"
+            )
+            label = "AI_CONTEXT"
+        lines.extend([f"## {message.id} {label}", "", f"{label}:", context, ""])
         transformed_messages.append(
             Message(
                 id=message.id,
@@ -64,7 +85,7 @@ def offline_semantic_log(thread: Thread) -> SemanticLog:
                 content=context,
                 timestamp=message.timestamp,
                 attachments=message.attachments,
-                metadata={**message.metadata, "semantic_context": True},
+                metadata={**message.metadata, "semantic_context": True, "semantic_artifact": label == "AI_ARTIFACT"},
             )
         )
     return SemanticLog(text="\n".join(lines).rstrip() + "\n", extraction_thread=replace_thread_messages(thread, transformed_messages))
@@ -104,7 +125,7 @@ def normalize_semantic_log_text(thread: Thread, text: str) -> str:
 def thread_from_semantic_text(original: Thread, semantic_text: str) -> Thread:
     transformed = []
     original_by_id = {message.id: message for message in original.messages}
-    blocks = re.split(r"^##\s+(\S+)\s+(USER_STATEMENT|AI_CONTEXT)\s*$", semantic_text, flags=re.MULTILINE)
+    blocks = re.split(r"^##\s+(\S+)\s+(USER_STATEMENT|AI_CONTEXT|AI_ARTIFACT)\s*$", semantic_text, flags=re.MULTILINE)
     if len(blocks) < 4:
         return offline_semantic_log(original).extraction_thread
     for index in range(1, len(blocks), 3):
@@ -117,7 +138,7 @@ def thread_from_semantic_text(original: Thread, semantic_text: str) -> Thread:
         if label == "USER_STATEMENT":
             content = original_message.content
         else:
-            content = body.replace("AI_CONTEXT:", "", 1).strip() or original_message.content
+            content = body.replace(f"{label}:", "", 1).strip() or original_message.content
         transformed.append(
             Message(
                 id=original_message.id,
@@ -127,7 +148,11 @@ def thread_from_semantic_text(original: Thread, semantic_text: str) -> Thread:
                 content=content,
                 timestamp=original_message.timestamp,
                 attachments=original_message.attachments,
-                metadata={**original_message.metadata, "semantic_context": label == "AI_CONTEXT"},
+                metadata={
+                    **original_message.metadata,
+                    "semantic_context": label in {"AI_CONTEXT", "AI_ARTIFACT"},
+                    "semantic_artifact": label == "AI_ARTIFACT",
+                },
             )
         )
     return replace_thread_messages(original, transformed or original.messages)
@@ -218,10 +243,81 @@ def infer_concepts(content: str, limit: int = 10) -> list[str]:
     return concepts or ["context"]
 
 
-def infer_bridge(next_user: Message | None) -> str:
+def infer_reaction(next_user: Message | None) -> str:
     if not next_user:
         return "No following user statement."
     compact = " ".join(next_user.content.split())
     if len(compact) > 140:
         compact = compact[:137].rstrip() + "..."
     return f"Next user responds: {compact}"
+
+
+def looks_like_artifact(content: str, next_user: Message | None) -> bool:
+    lower = content.lower()
+    next_lower = (next_user.content.lower() if next_user else "")
+    artifact_markers = [
+        "```",
+        "prompt",
+        "schema",
+        "draft",
+        "requirements",
+        "specification",
+        "plan:",
+        "roadmap",
+        "code",
+        "yaml",
+        "json",
+    ]
+    revision_markers = [
+        "remove",
+        "change",
+        "revise",
+        "edit",
+        "add",
+        "include",
+        "section",
+        "make it",
+        "instead",
+        "version",
+        "prompt",
+    ]
+    has_artifact_shape = any(marker in lower for marker in artifact_markers) or len(content) > 700
+    next_revises = any(marker in next_lower for marker in revision_markers)
+    return has_artifact_shape and next_revises
+
+
+def infer_artifact_type(content: str) -> str:
+    lower = content.lower()
+    if "```" in content or "def " in content or "function " in lower:
+        return "code"
+    if "schema" in lower or "json" in lower or "yaml" in lower:
+        return "schema"
+    if "prompt" in lower:
+        return "prompt"
+    if "plan" in lower or "roadmap" in lower:
+        return "plan"
+    if re.search(r"^\s*[-*]\s+", content, re.MULTILINE):
+        return "list"
+    if "draft" in lower:
+        return "draft"
+    return "other"
+
+
+def infer_artifact_action(content: str) -> str:
+    artifact_type = infer_artifact_type(content)
+    return {
+        "code": "Produced code",
+        "schema": "Produced schema",
+        "prompt": "Drafted prompt",
+        "plan": "Proposed plan",
+        "list": "Listed requirements",
+        "draft": "Drafted artifact",
+    }.get(artifact_type, "Produced artifact")
+
+
+def artifact_excerpt(content: str, max_chars: int = 900) -> str:
+    compact = " ".join(content.split())
+    if len(compact) <= max_chars:
+        return compact
+    cutoff = compact.rfind(" ", 0, max_chars)
+    return compact[: cutoff if cutoff > 240 else max_chars].rstrip() + "..."

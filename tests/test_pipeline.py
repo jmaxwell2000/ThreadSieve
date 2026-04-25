@@ -8,6 +8,7 @@ from threadsieve.archive import archive_thread
 from threadsieve.extractor import build_extraction_messages, extract_items, parse_model_json, repair_span
 from threadsieve.importers import import_text
 from threadsieve.index import index_object, index_thread, search
+from threadsieve.models import KnowledgeItem
 from threadsieve.pipeline import extract_sources, find_object_record, trace_object
 from threadsieve.writer import write_item
 
@@ -51,6 +52,38 @@ class PipelineTests(unittest.TestCase):
         messages = build_extraction_messages(thread, "Extract only decisions.")
 
         self.assertIn("json", " ".join(message["content"].lower() for message in messages))
+        payload = messages[-1]["content"]
+        self.assertIn("canonical_statement", payload)
+        self.assertIn("ref_type", payload)
+
+    def test_knowledge_item_accepts_extended_schema_fields(self):
+        item = KnowledgeItem.from_dict(
+            {
+                "type": "framework",
+                "title": "Logic-Prior Mode",
+                "summary": "A durable prompt framework.",
+                "tags": ["llm"],
+                "confidence": 0.9,
+                "object_role": "artifact_spec",
+                "canonical_statement": "Use a logic-prior non-anthropomorphic mode.",
+                "supersedes": ["idea_old"],
+                "extraction_rationale": "Merged from multiple refinement turns.",
+                "thread_position": {"first_message_index": 1, "last_message_index": 3},
+                "source_refs": [
+                    {
+                        "message_id": "msg_1",
+                        "start_char": 0,
+                        "end_char": 10,
+                        "ref_type": "revision_instruction",
+                    }
+                ],
+            },
+            "framework_123",
+        )
+
+        self.assertEqual(item.object_role, "artifact_spec")
+        self.assertEqual(item.source_refs[0].ref_type, "revision_instruction")
+        self.assertEqual(item.thread_position["last_message_index"], 3)
 
     def test_span_repair_prefers_exact_text(self):
         content = "Alpha beta gamma delta."

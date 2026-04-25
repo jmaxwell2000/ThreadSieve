@@ -70,6 +70,7 @@ class SourceRef:
     role: str | None = None
     timestamp: str | None = None
     granularity: str = "message"
+    ref_type: str | None = None
 
     @classmethod
     def from_dict(cls, raw: dict[str, Any]) -> "SourceRef":
@@ -83,6 +84,7 @@ class SourceRef:
             role=string_or_none(raw.get("role")),
             timestamp=string_or_none(raw.get("timestamp")),
             granularity=str(raw.get("granularity") or "message"),
+            ref_type=string_or_none(raw.get("ref_type")),
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -98,6 +100,7 @@ class SourceRef:
             "role": self.role,
             "timestamp": self.timestamp,
             "granularity": self.granularity,
+            "ref_type": self.ref_type,
         }
         for key, value in optional.items():
             if value is not None:
@@ -121,6 +124,13 @@ class KnowledgeItem:
     origin: str = "unclear"
     evidence: list[str] = field(default_factory=list)
     generated_by: dict[str, Any] = field(default_factory=dict)
+    object_role: str = "durable_note"
+    canonical_statement: str | None = None
+    parent_object_id: str | None = None
+    supersedes: list[str] = field(default_factory=list)
+    extraction_rationale: str | None = None
+    thread_position: dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
     def from_dict(cls, raw: dict[str, Any], item_id: str) -> "KnowledgeItem":
@@ -140,6 +150,13 @@ class KnowledgeItem:
             origin=normalize_origin(str(raw.get("origin", "unclear"))),
             evidence=normalize_evidence(raw.get("evidence") or []),
             generated_by=dict(raw.get("generated_by") or {}),
+            object_role=normalize_object_role(str(raw.get("object_role", "durable_note"))),
+            canonical_statement=string_or_none(raw.get("canonical_statement")),
+            parent_object_id=string_or_none(raw.get("parent_object_id")),
+            supersedes=normalize_string_list(raw.get("supersedes") or []),
+            extraction_rationale=string_or_none(raw.get("extraction_rationale")),
+            thread_position=dict(raw.get("thread_position") or {}),
+            metadata=dict(raw.get("metadata") or {}),
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -158,6 +175,13 @@ class KnowledgeItem:
             "origin": self.origin,
             "evidence": self.evidence,
             "generated_by": self.generated_by,
+            "object_role": self.object_role,
+            "canonical_statement": self.canonical_statement,
+            "parent_object_id": self.parent_object_id,
+            "supersedes": self.supersedes,
+            "extraction_rationale": self.extraction_rationale,
+            "thread_position": self.thread_position,
+            "metadata": self.metadata,
         }
 
 
@@ -214,6 +238,21 @@ def normalize_evidence(raw_evidence: list[Any]) -> list[str]:
         if text and text not in evidence:
             evidence.append(text[:1200])
     return evidence[:8]
+
+
+def normalize_object_role(value: str) -> str:
+    normalized = value.strip().lower().replace("-", "_").replace(" ", "_")
+    allowed = {"durable_note", "artifact_spec", "revision", "decision", "raw_capture"}
+    return normalized if normalized in allowed else "durable_note"
+
+
+def normalize_string_list(raw_items: list[Any]) -> list[str]:
+    items: list[str] = []
+    for item in raw_items:
+        text = str(item).strip()
+        if text and text not in items:
+            items.append(text)
+    return items
 
 
 def clean_title(title: str) -> str:
