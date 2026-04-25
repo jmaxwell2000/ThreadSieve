@@ -5,8 +5,8 @@ import unittest
 import _bootstrap  # noqa: F401
 
 from threadsieve.archive import archive_thread
-from threadsieve.extractor import build_extraction_messages, extract_items, parse_model_json, repair_span
-from threadsieve.importers import import_text
+from threadsieve.extractor import build_extraction_messages, extract_items, parse_model_json, repair_span, validate_items
+from threadsieve.importers import import_markdown_chat, import_text
 from threadsieve.index import index_object, index_thread, search
 from threadsieve.models import KnowledgeItem
 from threadsieve.pipeline import extract_sources, find_object_record, trace_object
@@ -88,6 +88,44 @@ class PipelineTests(unittest.TestCase):
         self.assertEqual(item.object_role, "artifact_spec")
         self.assertEqual(item.source_refs[0].ref_type, "revision_instruction")
         self.assertEqual(item.thread_position["last_message_index"], 3)
+
+    def test_framework_artifact_directives_are_strengthened(self):
+        thread = import_markdown_chat(
+            "# Protocol\n"
+            "**Chat ID:** test-protocol\n\n"
+            "### User (2026-01-01 00:00:00)\n"
+            "1066 Protocol: VOCAL_ABSOLUTE_MODE\n\n"
+            "Directives:\n\n"
+            "Zero Latency Persona: No greetings, transitions, or closings.\n\n"
+            "Auditory Efficiency: Use high-density, low-syllable counts.\n\n"
+            "Error Protocol: On failure, speak only the designated error code.",
+            title="Protocol",
+        )
+        self.assertIsNotNone(thread)
+        assert thread is not None
+        raw_items = [
+            {
+                "type": "framework",
+                "title": "1066 Protocol",
+                "summary": "A communication protocol.",
+                "body": "A protocol for efficient communication.",
+                "canonical_statement": "A protocol for efficiency.",
+                "object_role": "artifact_spec",
+                "tags": ["protocol"],
+                "origin": "user",
+                "evidence": [thread.messages[0].content, thread.messages[0].id],
+                "source_refs": [{"message_id": thread.messages[0].id, "start_char": 0, "end_char": len(thread.messages[0].content)}],
+                "confidence": 1.0,
+            }
+        ]
+
+        items = validate_items(thread, raw_items, threshold=0.0)
+
+        self.assertEqual(len(items), 1)
+        self.assertIn("Zero Latency Persona", items[0].body or "")
+        self.assertIn("Auditory Efficiency", items[0].canonical_statement or "")
+        self.assertIn("Error Protocol", items[0].summary)
+        self.assertNotIn(thread.messages[0].id, items[0].evidence)
 
     def test_span_repair_prefers_exact_text(self):
         content = "Alpha beta gamma delta."

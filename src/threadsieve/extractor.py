@@ -156,6 +156,7 @@ def validate_items(thread: Thread, raw_items: list[dict[str, Any]], threshold: f
             continue
         raw = dict(raw)
         raw["source_refs"] = refs
+        raw = strengthen_framework_artifact(thread, raw, refs)
         source_key = json.dumps(refs, sort_keys=True)
         item_type = str(raw.get("type", "idea"))
         title = str(raw.get("title", "Untitled"))
@@ -163,6 +164,94 @@ def validate_items(thread: Thread, raw_items: list[dict[str, Any]], threshold: f
         if item.confidence >= threshold:
             items.append(item)
     return dedupe_items(items)
+
+
+def strengthen_framework_artifact(thread: Thread, raw: dict[str, Any], refs: list[dict[str, Any]]) -> dict[str, Any]:
+    item_type = str(raw.get("type", "")).strip().lower()
+    object_role = str(raw.get("object_role", "")).strip().lower()
+    if item_type != "framework" and object_role != "artifact_spec":
+        return raw
+
+    source_text = referenced_user_text(thread, refs)
+    directives = extract_directives(source_text)
+    if not directives:
+        return raw
+
+    title = str(raw.get("title") or first_nonempty_line(source_text) or "Framework").strip()
+    directive_names = [name for name, _ in directives]
+    body = "\n".join(f"{index}. {name}: {description}" for index, (name, description) in enumerate(directives, start=1))
+    canonical = f"{title} requires " + "; ".join(f"{name}: {description}" for name, description in directives) + "."
+    summary = (
+        f"{title} is a user-authored framework with constraints covering "
+        f"{', '.join(directive_names[:-1])}, and {directive_names[-1]}."
+        if len(directive_names) > 1
+        else f"{title} is a user-authored framework defining {directive_names[0]}."
+    )
+
+    strengthened = dict(raw)
+    if generic_or_short(strengthened.get("summary"), directive_names, min_chars=120):
+        strengthened["summary"] = summary
+    if generic_or_short(strengthened.get("body"), directive_names, min_chars=180):
+        strengthened["body"] = body
+    if generic_or_short(strengthened.get("canonical_statement"), directive_names, min_chars=180):
+        strengthened["canonical_statement"] = canonical
+    strengthened["object_role"] = "artifact_spec"
+    return strengthened
+
+
+def referenced_user_text(thread: Thread, refs: list[dict[str, Any]]) -> str:
+    message_by_id = {message.id: message for message in thread.messages}
+    chunks = []
+    for ref in refs:
+        message = message_by_id.get(str(ref.get("message_id", "")))
+        if not message or message.role != "user":
+            continue
+        chunks.append(message.content)
+    return "\n\n".join(chunks)
+
+
+def extract_directives(text: str) -> list[tuple[str, str]]:
+    if not text:
+        return []
+    directive_text = text.split("Directives:", 1)[1] if "Directives:" in text else text
+    pairs: list[tuple[str, str]] = []
+    for paragraph in re.split(r"\n\s*\n", directive_text.strip()):
+        compact = " ".join(paragraph.split())
+        if ":" not in compact:
+            continue
+        name, description = compact.split(":", 1)
+        name = name.strip()
+        description = description.strip()
+        if not valid_directive_name(name) or not description:
+            continue
+        pairs.append((name, description))
+    return pairs[:12]
+
+
+def valid_directive_name(name: str) -> bool:
+    lowered = name.lower()
+    if lowered in {"user", "assistant", "ai", "example", "directives"}:
+        return False
+    if len(name) < 3 or len(name) > 80:
+        return False
+    return bool(re.search(r"[A-Za-z]", name))
+
+
+def generic_or_short(value: Any, directive_names: list[str], min_chars: int) -> bool:
+    text = str(value or "").strip()
+    if len(text) < min_chars:
+        return True
+    lowered = text.lower()
+    matched = sum(1 for name in directive_names if name.lower() in lowered)
+    return matched < min(3, len(directive_names))
+
+
+def first_nonempty_line(text: str) -> str | None:
+    for line in text.splitlines():
+        compact = line.strip()
+        if compact:
+            return compact
+    return None
 
 
 def repair_span(content: str, raw_ref: dict[str, Any], start_char: int, end_char: int) -> tuple[int, int]:

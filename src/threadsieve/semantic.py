@@ -281,7 +281,6 @@ def next_user_after_message_id(messages: list[Message], message_id: str) -> Mess
 def ai_context_body(message: Message, next_user: Message | None) -> str:
     next_ref = next_user.id if next_user else "none"
     return (
-        "AI_CONTEXT:\n"
         f"- ACTION: {infer_action(message.content)}\n"
         f"- CONCEPTS_INTRODUCED: {', '.join(infer_concepts(message.content))}\n"
         f"- NEXT_USER_REF: {next_ref}\n"

@@ -235,9 +235,15 @@ def normalize_evidence(raw_evidence: list[Any]) -> list[str]:
     evidence: list[str] = []
     for item in raw_evidence:
         text = str(item).strip()
+        if is_bare_message_id(text):
+            continue
         if text and text not in evidence:
             evidence.append(text[:1200])
     return evidence[:8]
+
+
+def is_bare_message_id(text: str) -> bool:
+    return text.startswith("msg_") and all(ch.isalnum() or ch == "_" for ch in text) and len(text) <= 80
 
 
 def normalize_object_role(value: str) -> str:

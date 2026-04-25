@@ -92,6 +92,7 @@ class SemanticLogTests(unittest.TestCase):
 
         self.assertIn(f"## {thread.messages[1].id} AI_CONTEXT", sanitized)
         self.assertNotIn(f"## {thread.messages[1].id} AI_ARTIFACT", sanitized)
+        self.assertNotIn("\nAI_CONTEXT:\n", sanitized)
 
     def test_write_semantic_log(self):
         thread = import_text("User: Preserve this.", title="Write Log")
