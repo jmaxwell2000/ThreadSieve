@@ -58,6 +58,7 @@ class PipelineTests(unittest.TestCase):
         self.assertIn("ref_type", payload)
         self.assertIn("artifact_spec", payload)
         self.assertIn("named protocol", DEFAULT_EXTRACT_PROMPT)
+        self.assertIn("body must enumerate the essential directives", DEFAULT_EXTRACT_PROMPT)
 
     def test_knowledge_item_accepts_extended_schema_fields(self):
         item = KnowledgeItem.from_dict(

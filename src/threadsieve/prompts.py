@@ -16,7 +16,7 @@ Include origin as one of: user, assistant, mixed, unclear.
 Include evidence as short source excerpts when useful, not full transcripts.
 If the user provides a named protocol, framework, prompt, spec, mode, rubric, or set of directives, extract it as a complete structured artifact. Prefer type framework and object_role artifact_spec unless a more specific supported type clearly fits.
 For user-authored protocols/specs/directives, preserve every essential directive in summary, body, canonical_statement, evidence, and source_refs. Do not cite only the title or first lines.
-canonical_statement must be a durable proposition or compact full specification, not merely a title.
+For protocol/framework artifacts, summary must name the protocol's purpose and its major constraints. body must enumerate the essential directives in plain language. canonical_statement must be a compact full specification, not merely a title or generic description.
 Prefer the user's evolving thought process over assistant suggestions.
 Only save assistant-introduced ideas when the user clearly adopts, modifies, questions, or builds on them.
 When consecutive user messages refine the same artifact, preference, requirement, or conceptual object, merge them into one higher-value item with multiple source_refs. Emit separate items only when a later message introduces an independent object, a decision, a task, or a contradiction.
@@ -52,6 +52,7 @@ Some assistant messages are artifacts the user is working on. Use AI_ARTIFACT wh
 - a draft document
 
 If the next user message edits, critiques, accepts, rejects, expands, or refers back to the assistant's artifact, use AI_ARTIFACT instead of AI_CONTEXT.
+Do not use AI_ARTIFACT merely because the assistant provided examples or a list. If the next user only says "continue", "yes, continue", "more examples", "give me more examples", or "what else", keep the assistant message as AI_CONTEXT because the user is requesting continuation, not revising an artifact.
 
 AI_CONTEXT format:
 - ACTION: 1-3 words describing the assistant's conversational move.

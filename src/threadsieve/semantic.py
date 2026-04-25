@@ -109,7 +109,7 @@ def model_semantic_log(thread: Thread, model_config: dict[str, Any], semantic_pr
     )
     response_data = fetch_json(request, timeout=provider.timeout_seconds)
     content = response_message_content(response_data, "semantic log request")
-    return normalize_semantic_log_text(thread, content)
+    return sanitize_semantic_log_text(thread, normalize_semantic_log_text(thread, content))
 
 
 def normalize_semantic_log_text(thread: Thread, text: str) -> str:
@@ -117,6 +117,28 @@ def normalize_semantic_log_text(thread: Thread, text: str) -> str:
     if not stripped.startswith("# "):
         return "\n".join(semantic_header(thread) + ["", stripped]).rstrip() + "\n"
     return stripped + "\n"
+
+
+def sanitize_semantic_log_text(original: Thread, semantic_text: str) -> str:
+    """Repair model semantic logs where continuation examples are mislabeled as artifacts."""
+    blocks = re.split(r"^##\s+(\S+)\s+(USER_STATEMENT|AI_CONTEXT|AI_ARTIFACT)\s*$", semantic_text, flags=re.MULTILINE)
+    if len(blocks) < 4:
+        return semantic_text
+
+    original_by_id = {message.id: message for message in original.messages}
+    output = [blocks[0].rstrip()]
+    for block_index in range(1, len(blocks), 3):
+        message_id = blocks[block_index]
+        label = blocks[block_index + 1]
+        body = blocks[block_index + 2].strip()
+        message = original_by_id.get(message_id)
+        if label == "AI_ARTIFACT" and message:
+            next_user = next_user_after_message_id(original.messages, message_id)
+            if not looks_like_artifact(message.content, next_user):
+                label = "AI_CONTEXT"
+                body = ai_context_body(message, next_user)
+        output.extend(["", f"## {message_id} {label}", "", body])
+    return "\n".join(output).rstrip() + "\n"
 
 
 def thread_from_semantic_text(original: Thread, semantic_text: str) -> Thread:
@@ -249,6 +271,24 @@ def next_user_message(messages: list[Message], index: int) -> Message | None:
     return None
 
 
+def next_user_after_message_id(messages: list[Message], message_id: str) -> Message | None:
+    for index, message in enumerate(messages):
+        if message.id == message_id:
+            return next_user_message(messages, index)
+    return None
+
+
+def ai_context_body(message: Message, next_user: Message | None) -> str:
+    next_ref = next_user.id if next_user else "none"
+    return (
+        "AI_CONTEXT:\n"
+        f"- ACTION: {infer_action(message.content)}\n"
+        f"- CONCEPTS_INTRODUCED: {', '.join(infer_concepts(message.content))}\n"
+        f"- NEXT_USER_REF: {next_ref}\n"
+        f"- NEXT_USER_REACTION: {infer_reaction(next_user)}"
+    )
+
+
 def infer_action(content: str) -> str:
     lower = content.lower()
     if "?" in content:
@@ -333,6 +373,15 @@ def looks_like_artifact(content: str, next_user: Message | None) -> bool:
         "accept",
         "reject",
         "critique",
+        "looks good",
+        "that's good",
+        "that is good",
+        "use this",
+        "save this",
+        "remember this",
+        "keep this",
+        "works",
+        "perfect",
     ]
     continuation_only = {
         "continue",

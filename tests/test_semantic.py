@@ -5,7 +5,14 @@ import unittest
 import _bootstrap  # noqa: F401
 
 from threadsieve.importers import import_text
-from threadsieve.semantic import looks_like_artifact, offline_semantic_log, thread_from_semantic_text, write_semantic_log
+from threadsieve.prompts import DEFAULT_SEMANTIC_PROMPT
+from threadsieve.semantic import (
+    looks_like_artifact,
+    offline_semantic_log,
+    sanitize_semantic_log_text,
+    thread_from_semantic_text,
+    write_semantic_log,
+)
 
 
 class SemanticLogTests(unittest.TestCase):
@@ -56,6 +63,35 @@ class SemanticLogTests(unittest.TestCase):
         )
 
         self.assertFalse(looks_like_artifact(thread.messages[1].content, thread.messages[2]))
+        self.assertIn("more examples", DEFAULT_SEMANTIC_PROMPT)
+
+    def test_sanitize_downgrades_continuation_examples(self):
+        thread = import_text(
+            "User: Give examples.\n"
+            "Assistant: Example One: Weather status. Example Two: Schedule optimize.\n"
+            "User: Continue.",
+            title="Examples",
+        )
+        semantic_text = (
+            "# Semantic Log: Examples\n\n"
+            f"## {thread.messages[0].id} USER_STATEMENT\n"
+            "Give examples.\n"
+            f"## {thread.messages[1].id} AI_ARTIFACT\n"
+            "AI_ARTIFACT:\n"
+            "- ARTIFACT_TYPE: examples\n"
+            "- ACTION: Provide examples\n"
+            "- CONTENT_EXCERPT: Example One...\n"
+            "- CONTENT_HASH: abc123\n"
+            f"- NEXT_USER_REF: {thread.messages[2].id}\n"
+            "- NEXT_USER_REACTION: User asks to continue.\n"
+            f"## {thread.messages[2].id} USER_STATEMENT\n"
+            "Continue.\n"
+        )
+
+        sanitized = sanitize_semantic_log_text(thread, semantic_text)
+
+        self.assertIn(f"## {thread.messages[1].id} AI_CONTEXT", sanitized)
+        self.assertNotIn(f"## {thread.messages[1].id} AI_ARTIFACT", sanitized)
 
     def test_write_semantic_log(self):
         thread = import_text("User: Preserve this.", title="Write Log")
