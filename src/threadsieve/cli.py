@@ -6,6 +6,7 @@ import os
 import shutil
 import subprocess
 import sys
+import traceback
 from pathlib import Path
 from typing import Any
 
@@ -30,6 +31,8 @@ def main(argv: list[str] | None = None) -> int:
         print("Interrupted.", file=sys.stderr)
         return 130
     except Exception as exc:
+        if os.environ.get("THREADSIEVE_DEBUG"):
+            traceback.print_exc()
         print(f"threadsieve: {exc}", file=sys.stderr)
         return 1
 
