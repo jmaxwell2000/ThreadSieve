@@ -5,7 +5,7 @@ import unittest
 import _bootstrap  # noqa: F401
 
 from threadsieve.importers import import_text
-from threadsieve.semantic import offline_semantic_log, write_semantic_log
+from threadsieve.semantic import offline_semantic_log, thread_from_semantic_text, write_semantic_log
 
 
 class SemanticLogTests(unittest.TestCase):
@@ -55,6 +55,38 @@ class SemanticLogTests(unittest.TestCase):
 
             self.assertTrue(path.exists())
             self.assertIn("USER_STATEMENT", path.read_text(encoding="utf-8"))
+
+    def test_fenced_semantic_log_recovers_to_original_message_ids(self):
+        thread = import_text(
+            "User: Draft a compact protocol.\n"
+            "Assistant: Example plan:\n- Step one\n- Step two\n"
+            "User: Remove step two.",
+            title="Fenced",
+        )
+        semantic_text = """# Semantic Log: Fenced
+
+```USER_STATEMENT
+Draft a compact protocol.
+```
+```AI_ARTIFACT
+- ARTIFACT_TYPE: plan
+- ACTION: Proposed plan
+- CONTENT_EXCERPT: Example plan with two steps.
+- CONTENT_HASH: abc123
+- NEXT_USER_REF: msg_fake
+- NEXT_USER_REACTION: User removes step two.
+```
+```USER_STATEMENT
+Remove step two.
+```
+"""
+
+        recovered = thread_from_semantic_text(thread, semantic_text)
+
+        self.assertEqual([message.id for message in recovered.messages], [message.id for message in thread.messages])
+        self.assertEqual(recovered.messages[0].content, "Draft a compact protocol.")
+        self.assertTrue(recovered.messages[1].metadata["semantic_artifact"])
+        self.assertTrue(recovered.messages[1].metadata["semantic_recovered_from_fence"])
 
 
 if __name__ == "__main__":

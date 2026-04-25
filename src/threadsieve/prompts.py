@@ -65,6 +65,11 @@ AI_ARTIFACT format:
 - NEXT_USER_REACTION: Exact explanation of how the next user statement reacts to this artifact.
 
 Return only the semantic log. Keep message IDs in headings exactly as provided.
+Do not wrap blocks in Markdown code fences.
+Every block must start with a heading in this exact form:
+## <message_id> USER_STATEMENT
+## <message_id> AI_CONTEXT
+## <message_id> AI_ARTIFACT
 """
 
 DEFAULT_PROMPTS = {

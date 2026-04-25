@@ -124,6 +124,9 @@ def thread_from_semantic_text(original: Thread, semantic_text: str) -> Thread:
     original_by_id = {message.id: message for message in original.messages}
     blocks = re.split(r"^##\s+(\S+)\s+(USER_STATEMENT|AI_CONTEXT|AI_ARTIFACT)\s*$", semantic_text, flags=re.MULTILINE)
     if len(blocks) < 4:
+        fenced = parse_fenced_semantic_blocks(original, semantic_text)
+        if fenced:
+            return replace_thread_messages(original, fenced)
         return offline_semantic_log(original).extraction_thread
     for index in range(1, len(blocks), 3):
         message_id = blocks[index]
@@ -153,6 +156,56 @@ def thread_from_semantic_text(original: Thread, semantic_text: str) -> Thread:
             )
         )
     return replace_thread_messages(original, transformed or original.messages)
+
+
+def parse_fenced_semantic_blocks(original: Thread, semantic_text: str) -> list[Message]:
+    """Recover model outputs that used ```USER_STATEMENT fences instead of headings."""
+    matches = list(re.finditer(r"```(USER_STATEMENT|AI_CONTEXT|AI_ARTIFACT)\s*\n(.*?)\n```", semantic_text, re.DOTALL))
+    if not matches:
+        return []
+    source_messages = list(original.messages)
+    transformed: list[Message] = []
+    search_from = 0
+    for match in matches:
+        label = match.group(1)
+        body = match.group(2).strip()
+        original_message = next_matching_message(source_messages, search_from, label, body)
+        if not original_message:
+            continue
+        search_from = original_message.index + 1
+        if label == "USER_STATEMENT":
+            content = original_message.content
+        else:
+            content = body.replace(f"{label}:", "", 1).strip() or original_message.content
+        transformed.append(
+            Message(
+                id=original_message.id,
+                thread_id=original_message.thread_id,
+                role=original_message.role,
+                index=original_message.index,
+                content=content,
+                timestamp=original_message.timestamp,
+                attachments=original_message.attachments,
+                metadata={
+                    **original_message.metadata,
+                    "semantic_context": label in {"AI_CONTEXT", "AI_ARTIFACT"},
+                    "semantic_artifact": label == "AI_ARTIFACT",
+                    "semantic_recovered_from_fence": True,
+                },
+            )
+        )
+    return transformed
+
+
+def next_matching_message(messages: list[Message], start_index: int, label: str, body: str) -> Message | None:
+    desired_role = "user" if label == "USER_STATEMENT" else "assistant"
+    candidates = [message for message in messages if message.index >= start_index and message.role == desired_role]
+    if label == "USER_STATEMENT":
+        body_compact = " ".join(body.replace("USER_STATEMENT:", "", 1).split())
+        for message in candidates:
+            if " ".join(message.content.split()) == body_compact:
+                return message
+    return candidates[0] if candidates else None
 
 
 def replace_thread_messages(thread: Thread, messages: list[Message]) -> Thread:
