@@ -180,7 +180,9 @@ def strengthen_framework_artifact(thread: Thread, raw: dict[str, Any], refs: lis
     title = str(raw.get("title") or first_nonempty_line(source_text) or "Framework").strip()
     directive_names = [name for name, _ in directives]
     body = "\n".join(f"{index}. {name}: {description}" for index, (name, description) in enumerate(directives, start=1))
-    canonical = f"{title} requires " + "; ".join(f"{name}: {description}" for name, description in directives) + "."
+    canonical = f"{title} requires " + "; ".join(
+        f"{name} ({sentence_fragment(description)})" for name, description in directives
+    ) + "."
     summary = (
         f"{title} is a user-authored framework with constraints covering "
         f"{', '.join(directive_names[:-1])}, and {directive_names[-1]}."
@@ -238,12 +240,20 @@ def valid_directive_name(name: str) -> bool:
 
 
 def generic_or_short(value: Any, directive_names: list[str], min_chars: int) -> bool:
+    if isinstance(value, (list, tuple)):
+        return True
     text = str(value or "").strip()
+    if text.startswith("[") and text.endswith("]"):
+        return True
     if len(text) < min_chars:
         return True
     lowered = text.lower()
     matched = sum(1 for name in directive_names if name.lower() in lowered)
     return matched < min(3, len(directive_names))
+
+
+def sentence_fragment(text: str) -> str:
+    return text.strip().rstrip(".")
 
 
 def first_nonempty_line(text: str) -> str | None:

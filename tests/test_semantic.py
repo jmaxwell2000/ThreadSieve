@@ -94,6 +94,29 @@ class SemanticLogTests(unittest.TestCase):
         self.assertNotIn(f"## {thread.messages[1].id} AI_ARTIFACT", sanitized)
         self.assertNotIn("\nAI_CONTEXT:\n", sanitized)
 
+    def test_sanitize_restores_missing_original_messages(self):
+        thread = import_text(
+            "User: First user message.\n"
+            "Assistant: First response.\n"
+            "User: Missing user message.",
+            title="Missing",
+        )
+        semantic_text = (
+            "# Semantic Log: Missing\n\n"
+            f"## {thread.messages[0].id} USER_STATEMENT\n"
+            "First user message.\n"
+            f"## {thread.messages[1].id} AI_CONTEXT\n"
+            "- ACTION: Responded\n"
+            "- CONCEPTS_INTRODUCED: context\n"
+            "- NEXT_USER_REF: none\n"
+            "- NEXT_USER_REACTION: none\n"
+        )
+
+        sanitized = sanitize_semantic_log_text(thread, semantic_text)
+
+        self.assertIn(f"## {thread.messages[2].id} USER_STATEMENT", sanitized)
+        self.assertIn("Missing user message.", sanitized)
+
     def test_write_semantic_log(self):
         thread = import_text("User: Preserve this.", title="Write Log")
         semantic = offline_semantic_log(thread)

@@ -50,27 +50,11 @@ def offline_semantic_log(thread: Thread) -> SemanticLog:
             continue
 
         next_user = next_user_message(thread.messages, index)
-        next_ref = next_user.id if next_user else "none"
-        reaction = infer_reaction(next_user)
         if looks_like_artifact(message.content, next_user):
-            context = (
-                f"- ARTIFACT_TYPE: {infer_artifact_type(message.content)}\n"
-                f"- ACTION: {infer_artifact_action(message.content)}\n"
-                f"- CONTENT_EXCERPT: {artifact_excerpt(message.content)}\n"
-                f"- CONTENT_HASH: {short_hash(message.content, 12)}\n"
-                f"- NEXT_USER_REF: {next_ref}\n"
-                f"- NEXT_USER_REACTION: {reaction}"
-            )
+            context = ai_artifact_body(message, next_user)
             label = "AI_ARTIFACT"
         else:
-            action = infer_action(message.content)
-            concepts = ", ".join(infer_concepts(message.content))
-            context = (
-                f"- ACTION: {action}\n"
-                f"- CONCEPTS_INTRODUCED: {concepts}\n"
-                f"- NEXT_USER_REF: {next_ref}\n"
-                f"- NEXT_USER_REACTION: {reaction}"
-            )
+            context = ai_context_body(message, next_user)
             label = "AI_CONTEXT"
         lines.extend([f"## {message.id} {label}", "", f"{label}:", context, ""])
         transformed_messages.append(
@@ -120,25 +104,37 @@ def normalize_semantic_log_text(thread: Thread, text: str) -> str:
 
 
 def sanitize_semantic_log_text(original: Thread, semantic_text: str) -> str:
-    """Repair model semantic logs where continuation examples are mislabeled as artifacts."""
+    """Repair model semantic logs so they preserve every source message."""
     blocks = re.split(r"^##\s+(\S+)\s+(USER_STATEMENT|AI_CONTEXT|AI_ARTIFACT)\s*$", semantic_text, flags=re.MULTILINE)
     if len(blocks) < 4:
         return semantic_text
 
-    original_by_id = {message.id: message for message in original.messages}
+    parsed_blocks = {
+        blocks[index]: (blocks[index + 1], blocks[index + 2].strip())
+        for index in range(1, len(blocks), 3)
+    }
     output = [blocks[0].rstrip()]
-    for block_index in range(1, len(blocks), 3):
-        message_id = blocks[block_index]
-        label = blocks[block_index + 1]
-        body = blocks[block_index + 2].strip()
-        message = original_by_id.get(message_id)
-        if label == "AI_ARTIFACT" and message:
-            next_user = next_user_after_message_id(original.messages, message_id)
+    for message in original.messages:
+        label, body = parsed_blocks.get(message.id, semantic_block_for_message(original.messages, message))
+        if message.role == "user":
+            label = "USER_STATEMENT"
+            body = message.content
+        elif label == "AI_ARTIFACT":
+            next_user = next_user_after_message_id(original.messages, message.id)
             if not looks_like_artifact(message.content, next_user):
                 label = "AI_CONTEXT"
                 body = ai_context_body(message, next_user)
-        output.extend(["", f"## {message_id} {label}", "", body])
+        output.extend(["", f"## {message.id} {label}", "", body])
     return "\n".join(output).rstrip() + "\n"
+
+
+def semantic_block_for_message(messages: list[Message], message: Message) -> tuple[str, str]:
+    if message.role == "user":
+        return "USER_STATEMENT", message.content
+    next_user = next_user_after_message_id(messages, message.id)
+    if looks_like_artifact(message.content, next_user):
+        return "AI_ARTIFACT", ai_artifact_body(message, next_user)
+    return "AI_CONTEXT", ai_context_body(message, next_user)
 
 
 def thread_from_semantic_text(original: Thread, semantic_text: str) -> Thread:
@@ -283,6 +279,18 @@ def ai_context_body(message: Message, next_user: Message | None) -> str:
     return (
         f"- ACTION: {infer_action(message.content)}\n"
         f"- CONCEPTS_INTRODUCED: {', '.join(infer_concepts(message.content))}\n"
+        f"- NEXT_USER_REF: {next_ref}\n"
+        f"- NEXT_USER_REACTION: {infer_reaction(next_user)}"
+    )
+
+
+def ai_artifact_body(message: Message, next_user: Message | None) -> str:
+    next_ref = next_user.id if next_user else "none"
+    return (
+        f"- ARTIFACT_TYPE: {infer_artifact_type(message.content)}\n"
+        f"- ACTION: {infer_artifact_action(message.content)}\n"
+        f"- CONTENT_EXCERPT: {artifact_excerpt(message.content)}\n"
+        f"- CONTENT_HASH: {short_hash(message.content, 12)}\n"
         f"- NEXT_USER_REF: {next_ref}\n"
         f"- NEXT_USER_REACTION: {infer_reaction(next_user)}"
     )

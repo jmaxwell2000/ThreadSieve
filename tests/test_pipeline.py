@@ -108,7 +108,11 @@ class PipelineTests(unittest.TestCase):
                 "type": "framework",
                 "title": "1066 Protocol",
                 "summary": "A communication protocol.",
-                "body": "A protocol for efficient communication.",
+                "body": [
+                    "Zero Latency Persona: No greetings, transitions, or closings.",
+                    "Auditory Efficiency: Use high-density, low-syllable counts.",
+                    "Error Protocol: On failure, speak only the designated error code.",
+                ],
                 "canonical_statement": "A protocol for efficiency.",
                 "object_role": "artifact_spec",
                 "tags": ["protocol"],
@@ -123,6 +127,7 @@ class PipelineTests(unittest.TestCase):
 
         self.assertEqual(len(items), 1)
         self.assertIn("Zero Latency Persona", items[0].body or "")
+        self.assertNotIn("[", items[0].body or "")
         self.assertIn("Auditory Efficiency", items[0].canonical_statement or "")
         self.assertIn("Error Protocol", items[0].summary)
         self.assertNotIn(thread.messages[0].id, items[0].evidence)
