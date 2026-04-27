@@ -154,6 +154,8 @@ def validate_items(thread: Thread, raw_items: list[dict[str, Any]], threshold: f
             refs.append(repaired_ref)
         if not refs:
             continue
+        if assistant_context_only(thread, refs) or assistant_context_with_only_example_requests(thread, refs):
+            continue
         raw = dict(raw)
         raw["source_refs"] = refs
         raw = normalize_artifact_role(thread, raw, refs)
@@ -226,6 +228,53 @@ def normalize_artifact_role(thread: Thread, raw: dict[str, Any], refs: list[dict
     metadata["artifact_downgrade_reason"] = "No named/directive artifact or assistant artifact under user revision was cited."
     normalized["metadata"] = metadata
     return normalized
+
+
+def assistant_context_only(thread: Thread, refs: list[dict[str, Any]]) -> bool:
+    """Drop objects grounded only in compressed ordinary assistant context.
+
+    Assistant context explains what the user was reacting to. It should not
+    become a saved object unless a user message or AI_ARTIFACT is also cited.
+    """
+    message_by_id = {message.id: message for message in thread.messages}
+    cited_messages = [message_by_id.get(str(ref.get("message_id", ""))) for ref in refs]
+    cited_messages = [message for message in cited_messages if message is not None]
+    if not cited_messages:
+        return False
+    return all(
+        message.role == "assistant"
+        and message.metadata.get("semantic_context")
+        and not message.metadata.get("semantic_artifact")
+        for message in cited_messages
+    )
+
+
+def assistant_context_with_only_example_requests(thread: Thread, refs: list[dict[str, Any]]) -> bool:
+    message_by_id = {message.id: message for message in thread.messages}
+    cited_messages = [message_by_id.get(str(ref.get("message_id", ""))) for ref in refs]
+    cited_messages = [message for message in cited_messages if message is not None]
+    if not cited_messages:
+        return False
+    assistant_contexts = [
+        message
+        for message in cited_messages
+        if message.role == "assistant" and message.metadata.get("semantic_context") and not message.metadata.get("semantic_artifact")
+    ]
+    user_messages = [message for message in cited_messages if message.role == "user"]
+    if not assistant_contexts or not user_messages:
+        return False
+    return all(is_example_request_or_continuation(message.content) for message in user_messages)
+
+
+def is_example_request_or_continuation(text: str) -> bool:
+    compact = " ".join(text.lower().strip().strip(".!?").split())
+    if compact in {"continue", "yes continue", "yes, continue", "more examples", "give me more examples", "what else"}:
+        return True
+    if re.fullmatch(r"(yes[, ]+)?(?:continue|more|give me more examples)(?: please)?", compact):
+        return True
+    example_request = "example" in compact or "examples" in compact
+    request_shape = any(phrase in compact for phrase in ["give me", "show me", "provide", "list", "what else"])
+    return example_request and request_shape
 
 
 def artifact_spec_supported(thread: Thread, refs: list[dict[str, Any]]) -> bool:

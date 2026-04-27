@@ -8,7 +8,7 @@ from threadsieve.archive import archive_thread
 from threadsieve.extractor import build_extraction_messages, extract_items, parse_model_json, repair_span, validate_items
 from threadsieve.importers import import_markdown_chat, import_text
 from threadsieve.index import index_object, index_thread, search
-from threadsieve.models import KnowledgeItem
+from threadsieve.models import KnowledgeItem, Message, Thread
 from threadsieve.pipeline import extract_sources, find_object_record, parse_frontmatter, trace_object
 from threadsieve.prompts import DEFAULT_EXTRACT_PROMPT
 from threadsieve.writer import to_yaml_like, write_item
@@ -108,6 +108,82 @@ class PipelineTests(unittest.TestCase):
         self.assertEqual(len(items), 1)
         self.assertEqual(items[0].type, "idea")
         self.assertTrue(items[0].id.startswith("idea_"))
+
+    def test_assistant_context_only_items_are_dropped(self):
+        thread = Thread(
+            id="semantic-thread",
+            source_app="test",
+            title="Assistant context",
+            messages=[
+                Message(
+                    id="msg_assistant",
+                    thread_id="semantic-thread",
+                    role="assistant",
+                    index=0,
+                    content="- ACTION: Provided examples\n- CONCEPTS_INTRODUCED: calendar, pantry",
+                    metadata={"semantic_context": True, "semantic_artifact": False},
+                )
+            ],
+        )
+        raw_items = [
+            {
+                "type": "idea",
+                "title": "Assistant Example List",
+                "summary": "Assistant examples should not become a user idea.",
+                "tags": ["examples"],
+                "origin": "mixed",
+                "source_refs": [{"message_id": "msg_assistant", "start_char": 0, "end_char": 20}],
+                "confidence": 0.9,
+            }
+        ]
+
+        items = validate_items(thread, raw_items, threshold=0.0)
+
+        self.assertEqual(items, [])
+
+    def test_assistant_context_plus_example_request_user_refs_are_dropped(self):
+        thread = Thread(
+            id="semantic-thread",
+            source_app="test",
+            title="Continuation context",
+            messages=[
+                Message(
+                    id="msg_assistant",
+                    thread_id="semantic-thread",
+                    role="assistant",
+                    index=0,
+                    content="- ACTION: Provided examples\n- CONCEPTS_INTRODUCED: calendar, pantry",
+                    metadata={"semantic_context": True, "semantic_artifact": False},
+                ),
+                Message(
+                    id="msg_request",
+                    thread_id="semantic-thread",
+                    role="user",
+                    index=1,
+                    content="I want a compact assistant. Give me examples.",
+                ),
+                Message(id="msg_user", thread_id="semantic-thread", role="user", index=2, content="Yes, continue."),
+            ],
+        )
+        raw_items = [
+            {
+                "type": "product_concept",
+                "title": "Assistant Example Taxonomy",
+                "summary": "Assistant examples plus continuation should not become a saved taxonomy.",
+                "tags": ["examples"],
+                "origin": "mixed",
+                "source_refs": [
+                    {"message_id": "msg_request", "start_char": 0, "end_char": len("I want a compact assistant. Give me examples.")},
+                    {"message_id": "msg_assistant", "start_char": 0, "end_char": 20},
+                    {"message_id": "msg_user", "start_char": 0, "end_char": len("Yes, continue.")},
+                ],
+                "confidence": 0.9,
+            }
+        ]
+
+        items = validate_items(thread, raw_items, threshold=0.0)
+
+        self.assertEqual(items, [])
 
     def test_framework_artifact_directives_are_strengthened(self):
         thread = import_markdown_chat(

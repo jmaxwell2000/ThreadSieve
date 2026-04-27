@@ -168,6 +168,12 @@ def run_quality_checks(result: dict[str, Any], thread: Any, output_root: Path, f
                 record.get("type") != "framework" and record.get("object_role") != "artifact_spec",
                 "Example-continuation output should not become a framework or artifact_spec.",
             )
+            add_check(
+                result,
+                f"{record.get('id')} does not save assistant examples",
+                not record_has_assistant_refs(record),
+                "Example-continuation output was grounded in assistant examples.",
+            )
     add_check(result, "no bare message-id evidence", not has_bare_message_id_evidence(output_root), "Bare msg_ evidence found.")
     add_check(result, "no rendered list body", not has_rendered_list_body(output_root), "Python/JSON-style list body found.")
 
@@ -192,6 +198,13 @@ def record_has_artifact_support(record: dict[str, Any], thread: Any, semantic_te
         if message and message.role == "user" and looks_like_user_artifact_text(message.content):
             return True
     return False
+
+
+def record_has_assistant_refs(record: dict[str, Any]) -> bool:
+    refs = record.get("source_refs") or []
+    if not refs:
+        return False
+    return any(str(ref.get("role") or "").lower() == "assistant" for ref in refs)
 
 
 def add_check(result: dict[str, Any], name: str, passed: bool, message: str) -> None:
