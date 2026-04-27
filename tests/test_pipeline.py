@@ -9,9 +9,9 @@ from threadsieve.extractor import build_extraction_messages, extract_items, pars
 from threadsieve.importers import import_markdown_chat, import_text
 from threadsieve.index import index_object, index_thread, search
 from threadsieve.models import KnowledgeItem
-from threadsieve.pipeline import extract_sources, find_object_record, trace_object
+from threadsieve.pipeline import extract_sources, find_object_record, parse_frontmatter, trace_object
 from threadsieve.prompts import DEFAULT_EXTRACT_PROMPT
-from threadsieve.writer import write_item
+from threadsieve.writer import to_yaml_like, write_item
 
 
 class PipelineTests(unittest.TestCase):
@@ -89,6 +89,26 @@ class PipelineTests(unittest.TestCase):
         self.assertEqual(item.source_refs[0].ref_type, "revision_instruction")
         self.assertEqual(item.thread_position["last_message_index"], 3)
 
+    def test_stable_id_uses_normalized_item_type(self):
+        thread = import_text("User: Keep source links mandatory.", title="Type normalization")
+        raw_items = [
+            {
+                "type": "artifact_spec",
+                "title": "Source Link Rule",
+                "summary": "Source links are mandatory.",
+                "tags": ["source"],
+                "origin": "user",
+                "source_refs": [{"message_id": thread.messages[0].id, "start_char": 0, "end_char": len(thread.messages[0].content)}],
+                "confidence": 1.0,
+            }
+        ]
+
+        items = validate_items(thread, raw_items, threshold=0.0)
+
+        self.assertEqual(len(items), 1)
+        self.assertEqual(items[0].type, "idea")
+        self.assertTrue(items[0].id.startswith("idea_"))
+
     def test_framework_artifact_directives_are_strengthened(self):
         thread = import_markdown_chat(
             "# Protocol\n"
@@ -131,6 +151,63 @@ class PipelineTests(unittest.TestCase):
         self.assertIn("Auditory Efficiency", items[0].canonical_statement or "")
         self.assertIn("Error Protocol", items[0].summary)
         self.assertNotIn(thread.messages[0].id, items[0].evidence)
+
+    def test_framework_strengthening_requires_explicit_directives_section(self):
+        thread = import_markdown_chat(
+            "# Decision\n"
+            "**Chat ID:** test-decision\n\n"
+            "### User (2026-01-01 00:00:00)\n"
+            "Yes. Decision: keep the local memory extractor workflow small and source-linked.",
+            title="Decision",
+        )
+        self.assertIsNotNone(thread)
+        assert thread is not None
+        raw_items = [
+            {
+                "type": "framework",
+                "title": "Local Memory Extractor Workflow",
+                "summary": "Yes. Decision.",
+                "body": "A workflow.",
+                "canonical_statement": "Keep it small.",
+                "object_role": "artifact_spec",
+                "tags": ["workflow"],
+                "origin": "user",
+                "evidence": [thread.messages[0].content],
+                "source_refs": [{"message_id": thread.messages[0].id, "start_char": 0, "end_char": len(thread.messages[0].content)}],
+                "confidence": 1.0,
+            }
+        ]
+
+        items = validate_items(thread, raw_items, threshold=0.0)
+
+        self.assertEqual(len(items), 1)
+        self.assertEqual(items[0].type, "idea")
+        self.assertEqual(items[0].object_role, "durable_note")
+        self.assertNotIn("user-authored framework defining Yes. Decision", items[0].summary)
+
+    def test_frontmatter_multiline_strings_do_not_create_fake_top_level_keys(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "item.md"
+            path.write_text(
+                "---\n"
+                + to_yaml_like(
+                    {
+                        "id": "framework_123",
+                        "type": "framework",
+                        "body": "1. Source First: cite the source.\n2. Small Objects: split durable notes.",
+                        "source_refs": [{"message_id": "msg_123", "start_char": 0, "end_char": 12}],
+                    }
+                )
+                + "---\n",
+                encoding="utf-8",
+            )
+
+            data = parse_frontmatter(path)
+
+        self.assertEqual(data["body"], "1. Source First: cite the source.\n2. Small Objects: split durable notes.")
+        self.assertNotIn("1. Source First", data)
+        self.assertNotIn("2. Small Objects", data)
+        self.assertEqual(data["source_refs"][0]["message_id"], "msg_123")
 
     def test_span_repair_prefers_exact_text(self):
         content = "Alpha beta gamma delta."

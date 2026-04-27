@@ -129,6 +129,9 @@ def to_yaml_like(value: object, indent: int = 0) -> str:
             if isinstance(item, (dict, list)):
                 lines.append(f"{pad}{key}:")
                 lines.append(to_yaml_like(item, indent + 2))
+            elif isinstance(item, str) and "\n" in item:
+                lines.append(f"{pad}{key}: |-")
+                lines.extend(block_scalar_lines(item, indent + 2))
             else:
                 lines.append(f"{pad}{key}: {format_scalar(item)}")
         return "\n".join(lines) + "\n"
@@ -140,6 +143,9 @@ def to_yaml_like(value: object, indent: int = 0) -> str:
             if isinstance(item, (dict, list)):
                 lines.append(f"{pad}-")
                 lines.append(to_yaml_like(item, indent + 2))
+            elif isinstance(item, str) and "\n" in item:
+                lines.append(f"{pad}- |-")
+                lines.extend(block_scalar_lines(item, indent + 2))
             else:
                 lines.append(f"{pad}- {format_scalar(item)}")
         return "\n".join(lines) + "\n"
@@ -154,9 +160,14 @@ def format_scalar(value: object) -> str:
     if isinstance(value, (int, float)):
         return str(value)
     text = str(value).replace('"', '\\"')
-    if not text or any(ch in text for ch in [":", "#", "[", "]", "{", "}", "\n"]):
+    if not text or any(ch in text for ch in [":", "#", "[", "]", "{", "}"]):
         return f'"{text}"'
     return text
+
+
+def block_scalar_lines(text: str, indent: int) -> list[str]:
+    pad = " " * indent
+    return [f"{pad}{line}" if line else pad for line in text.splitlines()]
 
 
 def blockquote(text: str) -> str:

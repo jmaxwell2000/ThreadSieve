@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 from typing import Any
 
+from .extractor import looks_like_user_artifact_text
 from .ids import slugify
 from .importers import import_file
 from .pipeline import extract_sources, parse_frontmatter
@@ -145,17 +146,33 @@ def run_quality_checks(result: dict[str, Any], thread: Any, output_root: Path, f
                 "Example continuation was labeled as AI_ARTIFACT.",
             )
 
-    records = object_records(output_root)
+    created_files = [Path(path) for path in (result.get("summary") or {}).get("created_files") or []]
+    records = object_records(output_root, created_files)
     created = int(dict(result.get("summary") or {}).get("objects_created") or 0)
     if "example-continuation" not in fixture_path.name:
         add_check(result, "objects created", created > 0, "No objects were created.")
     for record in records:
         add_check(result, f"{record.get('id')} has source refs", bool(record.get("source_refs")), "Object missing source_refs.")
+        if record.get("type") == "framework" or record.get("object_role") == "artifact_spec":
+            add_check(
+                result,
+                f"{record.get('id')} artifact role is supported",
+                record_has_artifact_support(record, thread, semantic_text),
+                "framework/artifact_spec object was not grounded in a named user artifact or AI_ARTIFACT under revision.",
+            )
+    if "example-continuation" in fixture_path.name:
+        for record in records:
+            add_check(
+                result,
+                f"{record.get('id')} does not promote examples to artifact",
+                record.get("type") != "framework" and record.get("object_role") != "artifact_spec",
+                "Example-continuation output should not become a framework or artifact_spec.",
+            )
     add_check(result, "no bare message-id evidence", not has_bare_message_id_evidence(output_root), "Bare msg_ evidence found.")
     add_check(result, "no rendered list body", not has_rendered_list_body(output_root), "Python/JSON-style list body found.")
 
     if "directive-framework" in fixture_path.name or "long-mixed" in fixture_path.name:
-        combined = "\n".join(path.read_text(encoding="utf-8") for path in output_root.rglob("*.md"))
+        combined = "\n".join(path.read_text(encoding="utf-8") for path in created_files if path.exists())
         expected = (
             ["Zero Preamble", "Brevity Limit", "Signal Words", "Failure Mode"]
             if "directive-framework" in fixture_path.name
@@ -163,6 +180,18 @@ def run_quality_checks(result: dict[str, Any], thread: Any, output_root: Path, f
         )
         for directive in expected:
             add_check(result, f"framework preserves {directive}", directive in combined, f"Missing directive: {directive}")
+
+
+def record_has_artifact_support(record: dict[str, Any], thread: Any, semantic_text: str) -> bool:
+    messages = {message.id: message for message in thread.messages}
+    for ref in record.get("source_refs") or []:
+        message_id = str(ref.get("message_id") or "")
+        if f"## {message_id} AI_ARTIFACT" in semantic_text:
+            return True
+        message = messages.get(message_id)
+        if message and message.role == "user" and looks_like_user_artifact_text(message.content):
+            return True
+    return False
 
 
 def add_check(result: dict[str, Any], name: str, passed: bool, message: str) -> None:
@@ -179,9 +208,10 @@ def semantic_log_text(output_root: Path, thread_id: str) -> str:
     return matches[0].read_text(encoding="utf-8") if matches else ""
 
 
-def object_records(output_root: Path) -> list[dict[str, Any]]:
+def object_records(output_root: Path, paths: list[Path] | None = None) -> list[dict[str, Any]]:
     records = []
-    for path in sorted(output_root.rglob("*.md")):
+    candidates = paths if paths is not None else sorted(output_root.rglob("*.md"))
+    for path in candidates:
         if "semantic_logs" in path.parts or "_runs" in path.parts:
             continue
         data = parse_frontmatter(path)

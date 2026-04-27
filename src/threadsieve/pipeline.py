@@ -266,13 +266,17 @@ def parse_frontmatter(path: Path) -> dict[str, Any]:
         end = lines[1:].index("---") + 1
     except ValueError:
         return {}
+    frontmatter = lines[1:end]
     data: dict[str, Any] = {}
     source_refs: list[dict[str, Any]] = []
     in_refs = False
     current_ref: dict[str, Any] | None = None
-    for line in lines[1:end]:
+    index = 0
+    while index < len(frontmatter):
+        line = frontmatter[index]
         if line.startswith("source_refs:"):
             in_refs = True
+            index += 1
             continue
         if in_refs and line and not line.startswith(" "):
             in_refs = False
@@ -285,21 +289,40 @@ def parse_frontmatter(path: Path) -> dict[str, Any]:
                 if current_ref:
                     source_refs.append(current_ref)
                 current_ref = {}
+                index += 1
                 continue
             if current_ref is not None and ":" in stripped:
                 key, value = stripped.split(":", 1)
                 current_ref[key.strip()] = parse_scalar(value.strip())
+            index += 1
             continue
         if ":" in line and not line.startswith(" "):
             key, value = line.split(":", 1)
             value = value.strip()
+            if value in {"|", "|-", ">", ">-"}:
+                block, index = collect_block_scalar(frontmatter, index + 1)
+                data[key.strip()] = block
+                continue
             if value and value != "[]":
                 data[key.strip()] = parse_scalar(value)
+        index += 1
     if current_ref:
         source_refs.append(current_ref)
     if source_refs:
         data["source_refs"] = source_refs
     return data
+
+
+def collect_block_scalar(lines: list[str], start: int) -> tuple[str, int]:
+    block_lines: list[str] = []
+    index = start
+    while index < len(lines):
+        line = lines[index]
+        if line and not line.startswith(" "):
+            break
+        block_lines.append(line[2:] if line.startswith("  ") else line.lstrip())
+        index += 1
+    return "\n".join(block_lines).rstrip(), index
 
 
 def parse_scalar(value: str) -> Any:

@@ -14,11 +14,13 @@ Supported item types: idea, task, decision, question, feature, insight, requirem
 Supported object_role values: durable_note, artifact_spec, revision, decision, raw_capture.
 Include origin as one of: user, assistant, mixed, unclear.
 Include evidence as short source excerpts when useful, not full transcripts.
-If the user provides a named protocol, framework, prompt, spec, mode, rubric, or set of directives, extract it as a complete structured artifact. Prefer type framework and object_role artifact_spec unless a more specific supported type clearly fits.
+Use object_role artifact_spec only for named user-authored artifacts or assistant artifacts under explicit user revision. Ordinary product concepts, workflows, preferences, and assistant examples should use durable_note or raw_capture instead.
+If the user provides a named protocol, framework, prompt, spec, mode, rubric, or explicit Directives section, extract it as a complete structured artifact. Prefer type framework and object_role artifact_spec unless a more specific supported type clearly fits.
 For user-authored protocols/specs/directives, preserve every essential directive in summary, body, canonical_statement, evidence, and source_refs. Do not cite only the title or first lines.
 For protocol/framework artifacts, summary must name the protocol's purpose and its major constraints. body must enumerate the essential directives in plain language. canonical_statement must be a compact full specification, not merely a title or generic description.
 Prefer the user's evolving thought process over assistant suggestions.
 Only save assistant-introduced ideas when the user clearly adopts, modifies, questions, or builds on them.
+Do not emit durable objects from assistant-provided examples when the user's only response is to continue, request more examples, or ask what else. Treat those examples as AI_CONTEXT unless the user adopts, modifies, or turns one into a requirement.
 When consecutive user messages refine the same artifact, preference, requirement, or conceptual object, merge them into one higher-value item with multiple source_refs. Emit separate items only when a later message introduces an independent object, a decision, a task, or a contradiction.
 If the user edits or constrains an assistant-generated artifact, extract the user's adopted or modified specification, not merely the individual edit instruction. Include assistant source_refs only when necessary to identify the artifact under revision. Set origin to mixed when the durable object depends on assistant-generated wording but user-directed modifications define its meaning.
 Include canonical_statement for durable propositions or specifications.

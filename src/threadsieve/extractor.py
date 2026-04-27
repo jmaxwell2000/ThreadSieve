@@ -7,7 +7,7 @@ from difflib import SequenceMatcher
 from typing import Any
 
 from .ids import stable_item_id
-from .models import KnowledgeItem, SourceRef, Thread
+from .models import KnowledgeItem, SourceRef, Thread, normalize_type
 from .prompts import DEFAULT_EXTRACT_PROMPT
 from .providers import build_provider, fetch_json, provider_request, response_message_content
 
@@ -156,9 +156,10 @@ def validate_items(thread: Thread, raw_items: list[dict[str, Any]], threshold: f
             continue
         raw = dict(raw)
         raw["source_refs"] = refs
+        raw = normalize_artifact_role(thread, raw, refs)
         raw = strengthen_framework_artifact(thread, raw, refs)
         source_key = json.dumps(refs, sort_keys=True)
-        item_type = str(raw.get("type", "idea"))
+        item_type = normalize_type(str(raw.get("type", "idea")))
         title = str(raw.get("title", "Untitled"))
         item = KnowledgeItem.from_dict(raw, stable_item_id(item_type, title, source_key))
         if item.confidence >= threshold:
@@ -201,6 +202,67 @@ def strengthen_framework_artifact(thread: Thread, raw: dict[str, Any], refs: lis
     return strengthened
 
 
+def normalize_artifact_role(thread: Thread, raw: dict[str, Any], refs: list[dict[str, Any]]) -> dict[str, Any]:
+    """Keep artifact_spec/framework reserved for actual artifacts.
+
+    Models sometimes over-upgrade ordinary ideas or assistant example lists into
+    frameworks. That makes the output look authoritative when it is only context,
+    so the validator downgrades unsupported artifact labels before writing.
+    """
+    item_type = str(raw.get("type", "")).strip().lower()
+    object_role = str(raw.get("object_role", "")).strip().lower()
+    if item_type != "framework" and object_role != "artifact_spec":
+        return raw
+    if artifact_spec_supported(thread, refs):
+        return raw
+
+    normalized = dict(raw)
+    if item_type == "framework":
+        normalized["type"] = "idea"
+    if object_role == "artifact_spec":
+        normalized["object_role"] = "durable_note"
+    metadata = dict(normalized.get("metadata") or {})
+    metadata["artifact_downgraded"] = True
+    metadata["artifact_downgrade_reason"] = "No named/directive artifact or assistant artifact under user revision was cited."
+    normalized["metadata"] = metadata
+    return normalized
+
+
+def artifact_spec_supported(thread: Thread, refs: list[dict[str, Any]]) -> bool:
+    message_by_id = {message.id: message for message in thread.messages}
+    for ref in refs:
+        message = message_by_id.get(str(ref.get("message_id", "")))
+        if not message:
+            continue
+        if message.metadata.get("semantic_artifact"):
+            return True
+        if message.role == "user" and looks_like_user_artifact_text(message.content):
+            return True
+    return False
+
+
+def looks_like_user_artifact_text(text: str) -> bool:
+    lower = text.lower()
+    if has_directives_section(text):
+        return True
+    artifact_terms = [
+        "protocol",
+        "framework",
+        "prompt",
+        "specification",
+        " spec",
+        "mode",
+        "rubric",
+        "checklist",
+        "requirements",
+    ]
+    if not any(term in lower for term in artifact_terms):
+        return False
+    first_lines = "\n".join(text.splitlines()[:8])
+    has_name_shape = ":" in first_lines or re.search(r"^\s*(?:[-*]|\d+\.)\s+", text, re.MULTILINE)
+    return bool(has_name_shape)
+
+
 def referenced_user_text(thread: Thread, refs: list[dict[str, Any]]) -> str:
     message_by_id = {message.id: message for message in thread.messages}
     chunks = []
@@ -215,7 +277,10 @@ def referenced_user_text(thread: Thread, refs: list[dict[str, Any]]) -> str:
 def extract_directives(text: str) -> list[tuple[str, str]]:
     if not text:
         return []
-    directive_text = text.split("Directives:", 1)[1] if "Directives:" in text else text
+    marker = re.search(r"\bDirectives\s*:\s*", text, flags=re.IGNORECASE)
+    if not marker:
+        return []
+    directive_text = text[marker.end() :]
     pairs: list[tuple[str, str]] = []
     for paragraph in re.split(r"\n\s*\n", directive_text.strip()):
         compact = " ".join(paragraph.split())
@@ -232,11 +297,19 @@ def extract_directives(text: str) -> list[tuple[str, str]]:
 
 def valid_directive_name(name: str) -> bool:
     lowered = name.lower()
-    if lowered in {"user", "assistant", "ai", "example", "directives"}:
+    if lowered in {"user", "assistant", "ai", "example", "examples", "directives", "decision"}:
+        return False
+    if lowered.startswith(("yes.", "no.", "okay.", "ok.", "decision.")):
+        return False
+    if re.search(r"[.!?]", name):
         return False
     if len(name) < 3 or len(name) > 80:
         return False
-    return bool(re.search(r"[A-Za-z]", name))
+    return bool(re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9 _/\-()]*", name))
+
+
+def has_directives_section(text: str) -> bool:
+    return bool(re.search(r"\bDirectives\s*:\s*", text, flags=re.IGNORECASE))
 
 
 def generic_or_short(value: Any, directive_names: list[str], min_chars: int) -> bool:
