@@ -1,5 +1,6 @@
 from pathlib import Path
 import re
+import tempfile
 import unittest
 
 import _bootstrap  # noqa: F401
@@ -7,6 +8,7 @@ import _bootstrap  # noqa: F401
 from threadsieve.extractor import validate_items
 from threadsieve.importers import import_file
 from threadsieve.cli import build_parser, find_tests_dir
+from threadsieve.pipeline import extract_sources
 from threadsieve.semantic import looks_like_artifact, offline_semantic_log, sanitize_semantic_log_text
 
 
@@ -70,6 +72,25 @@ class RegressionFixtureTests(unittest.TestCase):
         self.assertNotIn(f"## {first_assistant.id} AI_ARTIFACT", sanitized)
         for message in thread.messages:
             self.assertIn(f"## {message.id} ", sanitized)
+
+    def test_low_confidence_fixture_routes_to_needs_review(self):
+        source = FIXTURE_DIR / "sample-low-confidence-review.md"
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "knowledge"
+
+            summary = extract_sources(source, output, {"provider": "offline"}, threshold=0.75, force=True)
+
+            created = [Path(path) for path in summary["created_files"]]
+
+        self.assertGreater(summary["needs_review_count"], 0)
+        self.assertTrue(any("_needs_review" in path.parts for path in created))
+
+    def test_assistant_adoption_boundary_fixture_has_adopted_and_rejected_examples(self):
+        thread = load_fixture("sample-assistant-adoption-boundary.md")
+        text = "\n".join(message.content for message in thread.messages)
+
+        self.assertIn("Do not save those names yet", text)
+        self.assertIn("Actually save Margin Lantern", text)
 
     def test_artifact_refinement_preserves_assistant_draft_as_artifact(self):
         thread = load_fixture("sample-artifact-refinement.md")

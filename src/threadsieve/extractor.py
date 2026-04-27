@@ -17,13 +17,19 @@ Return a single valid JSON object with an "items" array. Do not wrap the JSON in
 """
 
 
-def extract_items(thread: Thread, model_config: dict[str, Any], threshold: float, system_prompt: str | None = None) -> list[KnowledgeItem]:
+def extract_items(
+    thread: Thread,
+    model_config: dict[str, Any],
+    threshold: float,
+    system_prompt: str | None = None,
+    dropped: Counter[str] | None = None,
+) -> list[KnowledgeItem]:
     provider = build_provider(model_config)
     if provider.kind == "offline" or provider.name in {"offline", "none", "heuristic"}:
         raw_items = offline_extract(thread)
     else:
         raw_items = openai_compatible_extract(thread, model_config, system_prompt or DEFAULT_EXTRACT_PROMPT)
-    return validate_items(thread, raw_items, threshold)
+    return validate_items(thread, raw_items, threshold, dropped=dropped)
 
 
 def offline_extract(thread: Thread) -> list[dict[str, Any]]:
@@ -133,11 +139,12 @@ def extraction_payload(thread: Thread) -> dict[str, Any]:
     }
 
 
-def validate_items(thread: Thread, raw_items: list[dict[str, Any]], threshold: float) -> list[KnowledgeItem]:
+def validate_items(thread: Thread, raw_items: list[dict[str, Any]], threshold: float, dropped: Counter[str] | None = None) -> list[KnowledgeItem]:
     message_by_id = {message.id: message for message in thread.messages}
     items: list[KnowledgeItem] = []
     for raw in raw_items:
         if not isinstance(raw, dict):
+            count_drop(dropped, "invalid_candidate")
             continue
         refs = []
         for ref in raw.get("source_refs") or []:
@@ -153,12 +160,19 @@ def validate_items(thread: Thread, raw_items: list[dict[str, Any]], threshold: f
                 repaired_ref["ref_type"] = source_ref.ref_type
             refs.append(repaired_ref)
         if not refs:
+            count_drop(dropped, "missing_source_refs")
             continue
-        if assistant_context_only(thread, refs) or assistant_context_with_only_example_requests(thread, refs):
+        if assistant_context_only(thread, refs):
+            count_drop(dropped, "assistant_context_only")
+            continue
+        if assistant_context_with_only_example_requests(thread, refs):
+            count_drop(dropped, "assistant_example_context")
             continue
         raw = dict(raw)
         raw["source_refs"] = refs
         raw = normalize_artifact_role(thread, raw, refs)
+        if dict(raw.get("metadata") or {}).get("artifact_downgraded"):
+            count_drop(dropped, "unsupported_artifact_role")
         raw = strengthen_framework_artifact(thread, raw, refs)
         source_key = json.dumps(refs, sort_keys=True)
         item_type = normalize_type(str(raw.get("type", "idea")))
@@ -166,7 +180,14 @@ def validate_items(thread: Thread, raw_items: list[dict[str, Any]], threshold: f
         item = KnowledgeItem.from_dict(raw, stable_item_id(item_type, title, source_key))
         if item.confidence >= threshold:
             items.append(item)
+        else:
+            count_drop(dropped, "below_threshold")
     return dedupe_items(items)
+
+
+def count_drop(dropped: Counter[str] | None, reason: str) -> None:
+    if dropped is not None:
+        dropped[reason] += 1
 
 
 def strengthen_framework_artifact(thread: Thread, raw: dict[str, Any], refs: list[dict[str, Any]]) -> dict[str, Any]:
@@ -273,7 +294,7 @@ def is_example_request_or_continuation(text: str) -> bool:
     if re.fullmatch(r"(yes[, ]+)?(?:continue|more|give me more examples)(?: please)?", compact):
         return True
     example_request = "example" in compact or "examples" in compact
-    request_shape = any(phrase in compact for phrase in ["give me", "show me", "provide", "list", "what else"])
+    request_shape = any(phrase in compact for phrase in ["give ", "give me", "show me", "provide", "list", "what else"])
     return example_request and request_shape
 
 

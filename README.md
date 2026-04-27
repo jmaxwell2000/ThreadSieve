@@ -12,6 +12,7 @@ It is built to be boringly portable: plain Markdown notes, local source archives
 - `threadsieve extract --file ./thread.md`
 - `threadsieve extract --source ./chats --out ./knowledge`
 - `threadsieve trace OBJECT_ID --knowledge ./knowledge`
+- `threadsieve review --knowledge ./knowledge`
 - `threadsieve index ./knowledge`
 - `threadsieve regression`
 - `threadsieve eval`
@@ -66,11 +67,12 @@ Run a privacy-safe live model eval against synthetic fixtures only:
 
 ```bash
 ./bin/threadsieve eval
+./bin/threadsieve eval --suite full
 ```
 
-The default eval checks 5 synthetic fixtures against 3 current low-cost OpenRouter models. It estimates
-30 model calls: semantic log plus extraction for each fixture/model pair. Use `--max-calls` to enforce
-a hard budget.
+The default quick eval checks a small synthetic fixture subset against the primary budget model. Full eval
+checks the synthetic fixture corpus against 3 current low-cost OpenRouter models. Calls are estimated before
+the run: semantic log plus extraction for each fixture/model pair. Use `--max-calls` to enforce a hard budget.
 
 Extraction now creates an intermediate semantic log by default. User messages are preserved verbatim as
 `USER_STATEMENT`, while assistant messages are compressed into `AI_CONTEXT` metadata. The extractor uses
@@ -99,6 +101,29 @@ To bypass this stage:
 ```bash
 threadsieve extract --file examples/thread.md --no-semantic-log
 ```
+
+## Review Extracted Objects
+
+After extracting to a knowledge folder, list objects that are still raw or need review:
+
+```bash
+./bin/threadsieve review --knowledge ./knowledge
+```
+
+Inspect one object with its evidence and trace context:
+
+```bash
+./bin/threadsieve review OBJECT_ID --knowledge ./knowledge
+```
+
+Update review status and rebuild `index.jsonl`:
+
+```bash
+./bin/threadsieve review OBJECT_ID --knowledge ./knowledge --status accepted
+./bin/threadsieve review OBJECT_ID --knowledge ./knowledge --status rejected
+```
+
+Supported statuses are `raw`, `reviewed`, `accepted`, `rejected`, and `superseded`.
 
 If you do not want a virtual environment, use `pipx`:
 

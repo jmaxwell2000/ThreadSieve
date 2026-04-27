@@ -5,7 +5,7 @@ import unittest
 import _bootstrap  # noqa: F401
 
 from threadsieve.cli import build_parser
-from threadsieve.eval import DEFAULT_EVAL_MODELS, estimate_model_calls, eval_fixture_files, run_live_eval
+from threadsieve.eval import DEFAULT_EVAL_MODELS, QUICK_EVAL_FIXTURES, estimate_model_calls, eval_fixture_files, fixture_files_for_suite, run_live_eval
 
 
 FIXTURE_DIR = Path(__file__).parent / "fixtures" / "regression"
@@ -29,15 +29,22 @@ class EvalTests(unittest.TestCase):
         self.assertTrue(all(path.name.startswith("sample-") for path in files))
         self.assertFalse(any(path.name == "README.md" for path in files))
 
+    def test_quick_eval_uses_subset_of_fixtures(self):
+        files = fixture_files_for_suite(FIXTURE_DIR, "quick")
+
+        self.assertEqual([path.name for path in files], QUICK_EVAL_FIXTURES)
+        self.assertLess(len(files), len(eval_fixture_files(FIXTURE_DIR)))
+
     def test_eval_call_estimate_uses_two_stage_pipeline(self):
         files = eval_fixture_files(FIXTURE_DIR)
 
         self.assertEqual(estimate_model_calls(len(files), len(DEFAULT_EVAL_MODELS)), len(files) * len(DEFAULT_EVAL_MODELS) * 2)
 
     def test_eval_command_is_registered(self):
-        args = build_parser().parse_args(["eval", "--model", "openai/gpt-5-mini", "--max-calls", "75"])
+        args = build_parser().parse_args(["eval", "--suite", "full", "--model", "openai/gpt-5-mini", "--max-calls", "75"])
 
         self.assertEqual(args.command, "eval")
+        self.assertEqual(args.suite, "full")
         self.assertEqual(args.model, ["openai/gpt-5-mini"])
         self.assertEqual(args.max_calls, 75)
 
@@ -52,6 +59,7 @@ class EvalTests(unittest.TestCase):
                     model_config_base={"provider": "openrouter", "api_key": "not-used"},
                     threshold=0.75,
                     max_calls=1,
+                    suite="full",
                 )
 
 

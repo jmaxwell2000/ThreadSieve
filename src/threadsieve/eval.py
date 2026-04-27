@@ -17,6 +17,12 @@ DEFAULT_EVAL_MODELS = [
     "qwen/qwen3-30b-a3b",
 ]
 
+QUICK_EVAL_FIXTURES = [
+    "sample-artifact-refinement.md",
+    "sample-example-continuation.md",
+    "sample-low-confidence-review.md",
+]
+
 
 def default_fixture_dir() -> Path:
     return Path(__file__).resolve().parents[2] / "tests" / "fixtures" / "regression"
@@ -33,6 +39,17 @@ def eval_fixture_files(fixtures: Path) -> list[Path]:
     return files
 
 
+def fixture_files_for_suite(fixtures: Path, suite: str, explicit_fixtures: bool = False) -> list[Path]:
+    files = eval_fixture_files(fixtures)
+    if suite == "full" or explicit_fixtures or fixtures.is_file():
+        return files
+    wanted = set(QUICK_EVAL_FIXTURES)
+    selected = [path for path in files if path.name in wanted]
+    if not selected:
+        raise RuntimeError(f"No quick eval fixtures found in {fixtures}")
+    return selected
+
+
 def estimate_model_calls(fixture_count: int, model_count: int, semantic_logs: bool = True) -> int:
     return fixture_count * model_count * (2 if semantic_logs else 1)
 
@@ -46,8 +63,10 @@ def run_live_eval(
     model_config_base: dict[str, Any],
     threshold: float,
     max_calls: int,
+    suite: str = "quick",
+    explicit_fixtures: bool = False,
 ) -> dict[str, Any]:
-    fixture_paths = eval_fixture_files(fixtures)
+    fixture_paths = fixture_files_for_suite(fixtures, suite, explicit_fixtures=explicit_fixtures)
     estimated_calls = estimate_model_calls(len(fixture_paths), len(models), semantic_logs=True)
     if estimated_calls > max_calls:
         raise RuntimeError(f"Eval would make about {estimated_calls} model calls, above --max-calls {max_calls}.")
@@ -57,6 +76,7 @@ def run_live_eval(
         "fixtures": [str(path) for path in fixture_paths],
         "models": models,
         "provider": provider,
+        "suite": suite,
         "output": str(output_root),
         "estimated_model_calls": estimated_calls,
         "max_calls": max_calls,
@@ -257,6 +277,7 @@ def has_rendered_list_body(output_root: Path) -> bool:
 def print_eval_report(report: dict[str, Any]) -> None:
     print("ThreadSieve live eval")
     print(f"Provider: {report['provider']}")
+    print(f"Suite: {report.get('suite', 'quick')}")
     print(f"Models: {', '.join(report['models'])}")
     print(f"Fixtures: {len(report['fixtures'])}")
     print(f"Estimated model calls: {report['estimated_model_calls']} / {report['max_calls']}")

@@ -22,6 +22,7 @@ from .providers import PROVIDER_PRESETS, build_provider, fetch_json, provider_re
 from .semantic import EXTRACTION_FROM_SEMANTIC_LOG_PROMPT, build_semantic_log, write_semantic_log
 from .writer import append_jsonl, write_item
 from .pipeline import extract_sources, rebuild_index, trace_object
+from .review import format_review_detail, format_review_list, list_review_objects, review_object_record, update_review_status
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -69,6 +70,7 @@ def build_parser() -> argparse.ArgumentParser:
     regression.set_defaults(func=cmd_regression)
 
     eval_cmd = subparsers.add_parser("eval", help="Run live-model evals on privacy-safe fixtures.")
+    eval_cmd.add_argument("--suite", choices=["quick", "full"], default="quick", help="Eval suite to run. Defaults to quick.")
     eval_cmd.add_argument("--provider", default="openrouter", help="Provider to use. Defaults to openrouter.")
     eval_cmd.add_argument("--model", action="append", default=[], help="Model to test. May be repeated.")
     eval_cmd.add_argument("--fixtures", help="Fixture file/folder. Defaults to tests/fixtures/regression.")
@@ -119,6 +121,15 @@ def build_parser() -> argparse.ArgumentParser:
     trace.add_argument("object", help="Object ID or Markdown object file path.")
     trace.add_argument("--knowledge", default="./knowledge", help="Knowledge output folder containing index.jsonl.")
     trace.set_defaults(func=cmd_trace)
+
+    review = subparsers.add_parser("review", help="List, inspect, or update extracted knowledge objects.")
+    review.add_argument("object", nargs="?", help="Optional object ID or Markdown object file path.")
+    review.add_argument("--knowledge", default="./knowledge", help="Knowledge output folder containing index.jsonl.")
+    review.add_argument("--status", choices=["raw", "reviewed", "accepted", "rejected", "superseded"], help="Update the object's review status.")
+    review.add_argument("--limit", type=int, default=50, help="Maximum objects to list. Defaults to 50.")
+    review.add_argument("--type", dest="item_type", help="Filter listed objects by type.")
+    review.add_argument("--json", action="store_true", help="Print machine-readable JSON.")
+    review.set_defaults(func=cmd_review)
 
     watch = subparsers.add_parser("watch", help="Watch folders for extraction. Not implemented yet.")
     watch.set_defaults(func=cmd_watch)
@@ -223,7 +234,7 @@ def cmd_regression(args: argparse.Namespace) -> int:
 
 def cmd_eval(args: argparse.Namespace) -> int:
     config = load_config(args.config)
-    models = args.model or list(DEFAULT_EVAL_MODELS)
+    models = args.model or eval_models_for_suite(args.suite)
     fixtures = expand_path(args.fixtures) if args.fixtures else default_fixture_dir()
     output = expand_path(args.out) if args.out else Path.cwd() / "eval-runs" / utc_filename("eval")
     model_config = dict(config.extract_model)
@@ -240,12 +251,20 @@ def cmd_eval(args: argparse.Namespace) -> int:
         model_config_base=model_config,
         threshold=float(config.raw.get("behavior", {}).get("needs_review_confidence_threshold", config.confidence_threshold)),
         max_calls=args.max_calls,
+        suite=args.suite,
+        explicit_fixtures=bool(args.fixtures),
     )
     if args.json:
         print(json.dumps(report, indent=2, ensure_ascii=False, sort_keys=True))
     else:
         print_eval_report(report)
     return 0 if report.get("passed") else 1
+
+
+def eval_models_for_suite(suite: str) -> list[str]:
+    if suite == "full":
+        return list(DEFAULT_EVAL_MODELS)
+    return [DEFAULT_EVAL_MODELS[0]]
 
 
 def utc_filename(prefix: str) -> str:
@@ -407,6 +426,11 @@ def combine_summaries(summaries: list[dict[str, Any]]) -> dict[str, Any]:
     combined["warnings"] = [warning for summary in summaries for warning in list(summary.get("warnings") or [])]
     combined["errors"] = [error for summary in summaries for error in list(summary.get("errors") or [])]
     combined["created_files"] = [path for summary in summaries for path in list(summary.get("created_files") or [])]
+    dropped_counts: dict[str, int] = {}
+    for summary in summaries:
+        for reason, count in dict(summary.get("dropped_candidates_by_reason") or {}).items():
+            dropped_counts[reason] = dropped_counts.get(reason, 0) + int(count)
+    combined["dropped_candidates_by_reason"] = dict(sorted(dropped_counts.items()))
     return combined
 
 
@@ -428,6 +452,12 @@ def print_extract_summary(summary: dict[str, object]) -> None:
         print(f"  {item_type}s: {count}")
     print("")
     print(f"Needs review: {summary['needs_review_count']}")
+    dropped = dict(summary.get("dropped_candidates_by_reason") or {})
+    if dropped:
+        print("")
+        print("Quality filters:")
+        for reason, count in dropped.items():
+            print(f"  {reason}: {count}")
     created_files = list(summary.get("created_files") or [])
     if created_files:
         print("")
@@ -453,6 +483,33 @@ def cmd_index_jsonl(args: argparse.Namespace) -> int:
 
 def cmd_trace(args: argparse.Namespace) -> int:
     print(trace_object(expand_path(args.knowledge), args.object), end="")
+    return 0
+
+
+def cmd_review(args: argparse.Namespace) -> int:
+    knowledge = expand_path(args.knowledge)
+    if args.status:
+        if not args.object:
+            raise RuntimeError("Choose an object ID or path when using --status.")
+        record = update_review_status(knowledge, args.object, args.status)
+        if args.json:
+            print(json.dumps(record, indent=2, ensure_ascii=False, sort_keys=True))
+        else:
+            print(f"Updated {record['id']} status to {record['status']}")
+            print(record["path"])
+        return 0
+    if args.object:
+        record = review_object_record(knowledge, args.object)
+        if args.json:
+            print(json.dumps(record, indent=2, ensure_ascii=False, sort_keys=True))
+        else:
+            print(format_review_detail(knowledge, record), end="")
+        return 0
+    records = list_review_objects(knowledge, limit=args.limit, item_type=args.item_type)
+    if args.json:
+        print(json.dumps(records, indent=2, ensure_ascii=False, sort_keys=True))
+    else:
+        print(format_review_list(records), end="")
     return 0
 
 

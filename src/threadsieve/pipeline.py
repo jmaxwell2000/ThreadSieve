@@ -88,10 +88,12 @@ def extract_sources(
         "errors": [],
         "created_files": [],
         "semantic_logs_created": [],
+        "dropped_candidates_by_reason": {},
         "provider": model_config.get("provider", "offline"),
         "model": model_config.get("model"),
     }
     type_counts: Counter[str] = Counter()
+    dropped_counts: Counter[str] = Counter()
     if str(model_config.get("provider") or "offline").lower() in {"offline", "none", "heuristic"}:
         summary["warnings"].append(
             "Provider is offline; this is only a smoke test. Configure OpenRouter or another model for real semantic extraction."
@@ -126,7 +128,7 @@ def extract_sources(
             if not dry_run:
                 semantic_path = write_semantic_log(output_root / "semantic_logs", thread, semantic_log.text)
             summary["semantic_logs_created"].append(str(semantic_path))
-        raw_items = extract_items(extraction_thread, model_config, threshold=0.0, system_prompt=extraction_prompt)
+        raw_items = extract_items(extraction_thread, model_config, threshold=0.0, system_prompt=extraction_prompt, dropped=dropped_counts)
         written_for_source: list[str] = []
         for item in raw_items:
             enriched = enrich_item(item, thread, current_run_id, resolved, threshold, semantic_path)
@@ -156,6 +158,7 @@ def extract_sources(
             }
 
     summary["objects_by_type"] = dict(sorted(type_counts.items()))
+    summary["dropped_candidates_by_reason"] = dict(sorted(dropped_counts.items()))
     summary["finished_at"] = utc_now_iso()
     if not dry_run:
         save_state(output_root, state)

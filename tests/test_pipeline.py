@@ -1,3 +1,4 @@
+from collections import Counter
 from pathlib import Path
 import tempfile
 import unittest
@@ -137,9 +138,11 @@ class PipelineTests(unittest.TestCase):
             }
         ]
 
-        items = validate_items(thread, raw_items, threshold=0.0)
+        dropped = Counter()
+        items = validate_items(thread, raw_items, threshold=0.0, dropped=dropped)
 
         self.assertEqual(items, [])
+        self.assertEqual(dropped["assistant_context_only"], 1)
 
     def test_assistant_context_plus_example_request_user_refs_are_dropped(self):
         thread = Thread(
@@ -181,9 +184,58 @@ class PipelineTests(unittest.TestCase):
             }
         ]
 
-        items = validate_items(thread, raw_items, threshold=0.0)
+        dropped = Counter()
+        items = validate_items(thread, raw_items, threshold=0.0, dropped=dropped)
 
         self.assertEqual(items, [])
+
+    def test_assistant_context_plus_give_examples_user_ref_is_dropped(self):
+        thread = Thread(
+            id="semantic-thread",
+            source_app="test",
+            title="Give examples context",
+            messages=[
+                Message(id="msg_user", thread_id="semantic-thread", role="user", index=0, content="Give examples of a compact assistant helping with routine tasks."),
+                Message(
+                    id="msg_assistant",
+                    thread_id="semantic-thread",
+                    role="assistant",
+                    index=1,
+                    content="- ACTION: Provided examples\n- CONCEPTS_INTRODUCED: calendar, pantry",
+                    metadata={"semantic_context": True, "semantic_artifact": False},
+                ),
+            ],
+        )
+        raw_items = [
+            {
+                "type": "product_concept",
+                "title": "Compact Assistant Taxonomy",
+                "summary": "Assistant example categories should not become a product concept.",
+                "tags": ["examples"],
+                "origin": "mixed",
+                "source_refs": [
+                    {"message_id": "msg_user", "start_char": 0, "end_char": len("Give examples of a compact assistant helping with routine tasks.")},
+                    {"message_id": "msg_assistant", "start_char": 0, "end_char": 20},
+                ],
+                "confidence": 0.9,
+            }
+        ]
+
+        dropped = Counter()
+        items = validate_items(thread, raw_items, threshold=0.0, dropped=dropped)
+
+        self.assertEqual(items, [])
+        self.assertEqual(dropped["assistant_example_context"], 1)
+        self.assertEqual(dropped["assistant_example_context"], 1)
+
+    def test_validate_items_counts_missing_source_refs(self):
+        thread = import_text("User: Keep source links mandatory.", title="Missing refs")
+        dropped = Counter()
+
+        items = validate_items(thread, [{"type": "idea", "title": "No refs", "summary": "No refs"}], threshold=0.0, dropped=dropped)
+
+        self.assertEqual(items, [])
+        self.assertEqual(dropped["missing_source_refs"], 1)
 
     def test_framework_artifact_directives_are_strengthened(self):
         thread = import_markdown_chat(
@@ -325,6 +377,7 @@ class PipelineTests(unittest.TestCase):
             self.assertTrue((output / "semantic_logs").exists())
             self.assertTrue(summary["semantic_logs_created"])
             self.assertTrue(summary["created_files"])
+            self.assertIn("dropped_candidates_by_reason", summary)
 
             record = find_object_record(output, Path(summary["created_files"][0]).stem)
             self.assertIsNotNone(record)
