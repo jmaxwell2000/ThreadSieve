@@ -6,6 +6,7 @@ import _bootstrap  # noqa: F401
 
 from threadsieve.extractor import validate_items
 from threadsieve.importers import import_file
+from threadsieve.cli import build_parser, find_tests_dir
 from threadsieve.semantic import looks_like_artifact, offline_semantic_log, sanitize_semantic_log_text
 
 
@@ -26,6 +27,12 @@ class RegressionFixtureTests(unittest.TestCase):
 
         self.assertIn("synthetic or sanitized", readme)
         self.assertIn("Do not commit real chat exports", readme)
+
+    def test_regression_command_is_registered(self):
+        args = build_parser().parse_args(["regression"])
+
+        self.assertEqual(args.command, "regression")
+        self.assertEqual(find_tests_dir(), Path(__file__).parent)
 
     def test_semantic_logs_preserve_every_user_message_verbatim(self):
         for path in sorted(FIXTURE_DIR.glob("sample-*.md")):

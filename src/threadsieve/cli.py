@@ -63,6 +63,9 @@ def build_parser() -> argparse.ArgumentParser:
     test_provider.add_argument("--prompt", default="Reply with JSON: {\"ok\": true}", help="Tiny prompt to send to the configured provider.")
     test_provider.set_defaults(func=cmd_test_provider)
 
+    regression = subparsers.add_parser("regression", help="Run privacy-safe regression fixture tests.")
+    regression.set_defaults(func=cmd_regression)
+
     show_prompt = subparsers.add_parser("show-prompt", help="Print the active prompt path and contents.")
     show_prompt.add_argument("--kind", choices=sorted(DEFAULT_PROMPTS), default="extract", help="Prompt to show. Defaults to extract.")
     show_prompt.add_argument("--path-only", action="store_true", help="Only print the prompt file path.")
@@ -197,6 +200,25 @@ def cmd_test_provider(args: argparse.Namespace) -> int:
     content = response.get("choices", [{}])[0].get("message", {}).get("content")
     print(content or json.dumps(response)[:1000])
     return 0
+
+
+def cmd_regression(args: argparse.Namespace) -> int:
+    tests_dir = find_tests_dir()
+    command = [sys.executable, "-m", "unittest", "discover", "-s", str(tests_dir), "-p", "test_regression_fixtures.py"]
+    print("Running privacy-safe regression fixtures...", flush=True)
+    print(" ".join(command), flush=True)
+    return subprocess.run(command).returncode
+
+
+def find_tests_dir() -> Path:
+    candidates = [
+        Path.cwd() / "tests",
+        Path(__file__).resolve().parents[2] / "tests",
+    ]
+    for candidate in candidates:
+        if (candidate / "test_regression_fixtures.py").exists():
+            return candidate
+    raise RuntimeError("Could not find tests/test_regression_fixtures.py. Run this from a ThreadSieve source checkout.")
 
 
 def cmd_show_prompt(args: argparse.Namespace) -> int:

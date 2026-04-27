@@ -13,6 +13,7 @@ It is built to be boringly portable: plain Markdown notes, local source archives
 - `threadsieve extract --source ./chats --out ./knowledge`
 - `threadsieve trace OBJECT_ID --knowledge ./knowledge`
 - `threadsieve index ./knowledge`
+- `threadsieve regression`
 - `threadsieve extract --clipboard`
 - `threadsieve search "knowledge management"`
 - `threadsieve open OBJECT_ID`
@@ -52,6 +53,12 @@ The handoff-style pipeline command writes directly to a user-chosen knowledge fo
 ```bash
 ./bin/threadsieve extract --source examples/thread.md --out ./knowledge
 ./bin/threadsieve trace OBJECT_ID --knowledge ./knowledge
+```
+
+Run the privacy-safe regression fixture tests from a source checkout:
+
+```bash
+./bin/threadsieve regression
 ```
 
 Extraction now creates an intermediate semantic log by default. User messages are preserved verbatim as
