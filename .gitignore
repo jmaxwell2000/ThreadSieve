@@ -9,4 +9,5 @@ build/
 *.egg-info/
 /ThreadSieve/
 /knowledge*/
+/eval-runs/
 .DS_Store
