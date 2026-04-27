@@ -126,6 +126,48 @@ class RegressionFixtureTests(unittest.TestCase):
                 for pattern in forbidden_patterns:
                     self.assertIsNone(re.search(pattern, text, re.IGNORECASE), pattern)
 
+    def test_long_mixed_fixture_exercises_multiple_patterns(self):
+        thread = load_fixture("sample-long-mixed-conversation.md")
+        semantic = offline_semantic_log(thread)
+
+        self.assertGreaterEqual(len(thread.messages), 20)
+        for message in thread.messages:
+            self.assertIn(f"## {message.id} ", semantic.text)
+        for message in user_messages(thread):
+            self.assertIn(message.content, semantic.text)
+
+        example_assistant = next(message for message in thread.messages if "Example One:" in message.content)
+        next_user = thread.messages[example_assistant.index + 1]
+        self.assertEqual(next_user.role, "user")
+        self.assertFalse(looks_like_artifact(example_assistant.content, next_user))
+
+        draft_assistant = next(message for message in thread.messages if "Prompt draft:" in message.content)
+        revised_semantic_message = next(message for message in semantic.extraction_thread.messages if message.id == draft_assistant.id)
+        self.assertTrue(revised_semantic_message.metadata["semantic_artifact"])
+        self.assertIn("Summarize the whole conversation", revised_semantic_message.content)
+
+        protocol_message = next(message for message in thread.messages if "Compact Review Protocol" in message.content)
+        raw_items = [
+            {
+                "type": "framework",
+                "title": "Compact Review Protocol",
+                "summary": "A review protocol.",
+                "body": "Too generic.",
+                "canonical_statement": "A review protocol.",
+                "object_role": "artifact_spec",
+                "tags": ["review"],
+                "origin": "user",
+                "evidence": [protocol_message.content, protocol_message.id],
+                "source_refs": [{"message_id": protocol_message.id, "start_char": 0, "end_char": len(protocol_message.content)}],
+                "confidence": 1.0,
+            }
+        ]
+        items = validate_items(thread, raw_items, threshold=0.0)
+
+        self.assertEqual(len(items), 1)
+        for directive in ["Source First", "Small Objects", "Review Flag", "No Private Data"]:
+            self.assertIn(directive, items[0].summary + "\n" + (items[0].body or "") + "\n" + (items[0].canonical_statement or ""))
+
 
 if __name__ == "__main__":
     unittest.main()
