@@ -13,6 +13,7 @@ It is built to be boringly portable: plain Markdown notes, local source archives
 - `threadsieve extract --source ./chats --out ./knowledge`
 - `threadsieve trace OBJECT_ID --knowledge ./knowledge`
 - `threadsieve review --knowledge ./knowledge`
+- `threadsieve watch --source ./incoming --out ./knowledge`
 - `threadsieve index ./knowledge`
 - `threadsieve regression`
 - `threadsieve eval`
@@ -124,6 +125,27 @@ Update review status and rebuild `index.jsonl`:
 ```
 
 Supported statuses are `raw`, `reviewed`, `accepted`, `rejected`, and `superseded`.
+
+## Watch a Folder
+
+Watch mode polls a folder for supported source files and runs the same `--source/--out`
+extraction pipeline after files stop changing:
+
+```bash
+./bin/threadsieve watch --source ./incoming_chats --out ./knowledge
+```
+
+For scripts and testing, scan once and exit:
+
+```bash
+./bin/threadsieve watch --source ./incoming_chats --out ./knowledge --once
+```
+
+Tune polling and file-settle timing:
+
+```bash
+./bin/threadsieve watch --source ./incoming_chats --out ./knowledge --interval 10 --settle-seconds 3
+```
 
 If you do not want a virtual environment, use `pipx`:
 

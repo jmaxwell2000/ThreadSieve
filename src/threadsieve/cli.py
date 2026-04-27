@@ -23,6 +23,7 @@ from .semantic import EXTRACTION_FROM_SEMANTIC_LOG_PROMPT, build_semantic_log, w
 from .writer import append_jsonl, write_item
 from .pipeline import extract_sources, rebuild_index, trace_object
 from .review import format_review_detail, format_review_list, list_review_objects, review_object_record, update_review_status
+from .watch import build_watch_model_config, run_watch
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -131,7 +132,17 @@ def build_parser() -> argparse.ArgumentParser:
     review.add_argument("--json", action="store_true", help="Print machine-readable JSON.")
     review.set_defaults(func=cmd_review)
 
-    watch = subparsers.add_parser("watch", help="Watch folders for extraction. Not implemented yet.")
+    watch = subparsers.add_parser("watch", help="Watch a folder and extract supported files when they settle.")
+    watch.add_argument("--source", help="Folder to watch for supported source files.")
+    watch.add_argument("--out", help="Output folder for extracted knowledge.")
+    watch.add_argument("--provider", help="Provider override. Example: openrouter.")
+    watch.add_argument("--model", help="Model override.")
+    watch.add_argument("--extractor", action="append", default=[], help="Extractor name to request. May be repeated.")
+    watch.add_argument("--force", action="store_true", help="Reprocess source files even if state says they were already processed.")
+    watch.add_argument("--no-semantic-log", action="store_true", help="Skip semantic-log generation and extract from the raw transcript.")
+    watch.add_argument("--interval", type=float, default=5.0, help="Polling interval in seconds. Defaults to 5.")
+    watch.add_argument("--settle-seconds", type=float, default=2.0, help="Seconds a file must stay unchanged before processing. Defaults to 2.")
+    watch.add_argument("--once", action="store_true", help="Scan once, process ready files, then exit.")
     watch.set_defaults(func=cmd_watch)
 
     dedupe = subparsers.add_parser("dedupe", help="Detect semantic duplicates. Not implemented yet.")
@@ -514,8 +525,48 @@ def cmd_review(args: argparse.Namespace) -> int:
 
 
 def cmd_watch(args: argparse.Namespace) -> int:
-    print("Watch mode is not implemented yet. Use `threadsieve extract --source ./incoming --out ./knowledge` for now.")
+    config = load_config(args.config)
+    source_value = args.source or first_config_source(config)
+    output_value = args.out or config.raw.get("output")
+    if not source_value:
+        raise RuntimeError("threadsieve watch requires --source or sources in config.")
+    if not output_value:
+        raise RuntimeError("threadsieve watch requires --out or output in config.")
+    behavior = dict(config.raw.get("behavior") or {})
+    prompt = load_extract_prompt(config)
+    extractors = args.extractor or list(config.raw.get("extractors") or [])
+    if extractors:
+        prompt = prompt.rstrip() + "\nRequested extractor types: " + ", ".join(extractors) + ".\n"
+    if not args.once:
+        print(f"ThreadSieve watch")
+        print(f"Source: {expand_path(str(source_value))}")
+        print(f"Output: {expand_path(str(output_value))}")
+        print("Press Ctrl-C to stop.")
+        print("")
+    summaries = run_watch(
+        source=expand_path(str(source_value)),
+        output_root=expand_path(str(output_value)),
+        model_config=build_watch_model_config(config, provider=args.provider, model=args.model),
+        threshold=float(behavior.get("needs_review_confidence_threshold", config.confidence_threshold)),
+        force=args.force,
+        system_prompt=prompt,
+        write_index=bool(behavior.get("write_index", True)),
+        overwrite_existing=bool(behavior.get("overwrite_existing", False)),
+        semantic_logs=bool(behavior.get("semantic_logs", True)) and not args.no_semantic_log,
+        semantic_prompt=load_semantic_prompt(config),
+        interval_seconds=args.interval,
+        settle_seconds=args.settle_seconds,
+        once=args.once,
+        summary_printer=print_extract_summary,
+    )
+    if args.once and not summaries:
+        print("No ready files found.")
     return 0
+
+
+def first_config_source(config: Config) -> str | None:
+    sources = list(config.raw.get("sources") or [])
+    return str(sources[0]) if sources else None
 
 
 def cmd_dedupe(args: argparse.Namespace) -> int:
