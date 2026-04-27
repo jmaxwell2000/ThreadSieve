@@ -160,6 +160,8 @@ def validate_items(thread: Thread, raw_items: list[dict[str, Any]], threshold: f
                 repaired_ref["ref_type"] = source_ref.ref_type
             refs.append(repaired_ref)
         if not refs:
+            refs = repair_missing_source_refs(thread, raw)
+        if not refs:
             count_drop(dropped, "missing_source_refs")
             continue
         if assistant_context_only(thread, refs):
@@ -188,6 +190,107 @@ def validate_items(thread: Thread, raw_items: list[dict[str, Any]], threshold: f
 def count_drop(dropped: Counter[str] | None, reason: str) -> None:
     if dropped is not None:
         dropped[reason] += 1
+
+
+def repair_missing_source_refs(thread: Thread, raw: dict[str, Any]) -> list[dict[str, Any]]:
+    """Recover provenance when a model cites evidence but omits source_refs.
+
+    The prompt requires source_refs, but smaller or stricter JSON-mode models may
+    return only message IDs or evidence snippets. Accepting those without repair
+    would break ThreadSieve's provenance invariant, so we convert only verifiable
+    references into normal source_refs.
+    """
+    refs: list[dict[str, Any]] = []
+    seen: set[tuple[str, int, int]] = set()
+
+    for message_id in candidate_message_ids(raw):
+        message = next((message for message in thread.messages if message.id == message_id), None)
+        if not message:
+            continue
+        key = (message.id, 0, len(message.content))
+        if key in seen:
+            continue
+        seen.add(key)
+        refs.append(
+            {
+                "message_id": message.id,
+                "start_char": 0,
+                "end_char": len(message.content),
+                "ref_type": "evidence",
+            }
+        )
+
+    for quote in candidate_evidence_quotes(raw):
+        repaired = ref_from_evidence_quote(thread, quote)
+        if not repaired:
+            continue
+        key = (str(repaired["message_id"]), int(repaired["start_char"]), int(repaired["end_char"]))
+        if key in seen:
+            continue
+        seen.add(key)
+        refs.append(repaired)
+
+    return refs
+
+
+def candidate_message_ids(raw: dict[str, Any]) -> list[str]:
+    ids: list[str] = []
+    for key in ("source_message_ids", "message_ids", "source_messages", "messages"):
+        value = raw.get(key)
+        if isinstance(value, str):
+            ids.append(value)
+        elif isinstance(value, list):
+            for item in value:
+                if isinstance(item, str):
+                    ids.append(item)
+                elif isinstance(item, dict):
+                    text = first_text(item, "message_id", "id")
+                    if text:
+                        ids.append(text)
+    return ids
+
+
+def candidate_evidence_quotes(raw: dict[str, Any]) -> list[str]:
+    quotes: list[str] = []
+    for key in ("evidence", "exact_text", "quote", "excerpt"):
+        value = raw.get(key)
+        if isinstance(value, str):
+            quotes.append(value)
+        elif isinstance(value, list):
+            for item in value:
+                if isinstance(item, str):
+                    quotes.append(item)
+                elif isinstance(item, dict):
+                    text = first_text(item, "exact_text", "text", "quote", "excerpt")
+                    if text:
+                        quotes.append(text)
+    return [quote for quote in quotes if usable_evidence_quote(quote)]
+
+
+def usable_evidence_quote(quote: str) -> bool:
+    compact = " ".join(quote.split())
+    if len(compact) < 12:
+        return False
+    if re.fullmatch(r"msg_[A-Za-z0-9_]+", compact):
+        return False
+    return True
+
+
+def ref_from_evidence_quote(thread: Thread, quote: str) -> dict[str, Any] | None:
+    user_messages = [message for message in thread.messages if message.role == "user"]
+    other_messages = [message for message in thread.messages if message.role != "user"]
+    for message in user_messages + other_messages:
+        span = repair_span(message.content, {"exact_text": quote}, 0, 0)
+        if span == (0, 0):
+            continue
+        start, end = span
+        return {
+            "message_id": message.id,
+            "start_char": start,
+            "end_char": end,
+            "ref_type": "evidence",
+        }
+    return None
 
 
 def strengthen_framework_artifact(thread: Thread, raw: dict[str, Any], refs: list[dict[str, Any]]) -> dict[str, Any]:

@@ -237,6 +237,53 @@ class PipelineTests(unittest.TestCase):
         self.assertEqual(items, [])
         self.assertEqual(dropped["missing_source_refs"], 1)
 
+    def test_validate_items_repairs_missing_refs_from_message_ids(self):
+        thread = import_text("User: Keep source links mandatory.", title="Message refs")
+        dropped = Counter()
+
+        items = validate_items(
+            thread,
+            [
+                {
+                    "type": "idea",
+                    "title": "Source Link Rule",
+                    "summary": "Source links are mandatory.",
+                    "source_message_ids": [thread.messages[0].id],
+                    "confidence": 0.9,
+                }
+            ],
+            threshold=0.0,
+            dropped=dropped,
+        )
+
+        self.assertEqual(len(items), 1)
+        self.assertEqual(items[0].source_refs[0].message_id, thread.messages[0].id)
+        self.assertEqual(dropped["missing_source_refs"], 0)
+
+    def test_validate_items_repairs_missing_refs_from_evidence(self):
+        thread = import_text("User: Keep source links mandatory in every durable object.", title="Evidence refs")
+        dropped = Counter()
+
+        items = validate_items(
+            thread,
+            [
+                {
+                    "type": "idea",
+                    "title": "Source Link Rule",
+                    "summary": "Source links are mandatory.",
+                    "evidence": ["Keep source links mandatory"],
+                    "confidence": 0.9,
+                }
+            ],
+            threshold=0.0,
+            dropped=dropped,
+        )
+
+        self.assertEqual(len(items), 1)
+        self.assertEqual(items[0].source_refs[0].message_id, thread.messages[0].id)
+        self.assertGreater(items[0].source_refs[0].end_char, items[0].source_refs[0].start_char)
+        self.assertEqual(dropped["missing_source_refs"], 0)
+
     def test_framework_artifact_directives_are_strengthened(self):
         thread = import_markdown_chat(
             "# Protocol\n"
