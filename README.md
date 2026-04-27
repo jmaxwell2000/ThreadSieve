@@ -14,6 +14,7 @@ It is built to be boringly portable: plain Markdown notes, local source archives
 - `threadsieve trace OBJECT_ID --knowledge ./knowledge`
 - `threadsieve index ./knowledge`
 - `threadsieve regression`
+- `threadsieve eval`
 - `threadsieve extract --clipboard`
 - `threadsieve search "knowledge management"`
 - `threadsieve open OBJECT_ID`
@@ -60,6 +61,16 @@ Run the privacy-safe regression fixture tests from a source checkout:
 ```bash
 ./bin/threadsieve regression
 ```
+
+Run a privacy-safe live model eval against synthetic fixtures only:
+
+```bash
+./bin/threadsieve eval
+```
+
+The default eval checks 5 synthetic fixtures against 3 current low-cost OpenRouter models. It estimates
+30 model calls: semantic log plus extraction for each fixture/model pair. Use `--max-calls` to enforce
+a hard budget.
 
 Extraction now creates an intermediate semantic log by default. User messages are preserved verbatim as
 `USER_STATEMENT`, while assistant messages are compressed into `AI_CONTEXT` metadata. The extractor uses

@@ -7,11 +7,13 @@ import shutil
 import subprocess
 import sys
 import traceback
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 from .archive import archive_thread, load_thread_from_archive
 from .config import Config, default_config_path, expand_path, load_config, write_default_config
+from .eval import DEFAULT_EVAL_MODELS, default_fixture_dir, print_eval_report, run_live_eval
 from .extractor import extract_items
 from .importers import import_file, import_text
 from .index import get_object, index_object, index_thread, latest_thread_path, search
@@ -65,6 +67,15 @@ def build_parser() -> argparse.ArgumentParser:
 
     regression = subparsers.add_parser("regression", help="Run privacy-safe regression fixture tests.")
     regression.set_defaults(func=cmd_regression)
+
+    eval_cmd = subparsers.add_parser("eval", help="Run live-model evals on privacy-safe fixtures.")
+    eval_cmd.add_argument("--provider", default="openrouter", help="Provider to use. Defaults to openrouter.")
+    eval_cmd.add_argument("--model", action="append", default=[], help="Model to test. May be repeated.")
+    eval_cmd.add_argument("--fixtures", help="Fixture file/folder. Defaults to tests/fixtures/regression.")
+    eval_cmd.add_argument("--out", help="Output folder. Defaults to ./eval-runs/<timestamp>.")
+    eval_cmd.add_argument("--max-calls", type=int, default=75, help="Hard cap on estimated model calls. Defaults to 75.")
+    eval_cmd.add_argument("--json", action="store_true", help="Print machine-readable report JSON.")
+    eval_cmd.set_defaults(func=cmd_eval)
 
     show_prompt = subparsers.add_parser("show-prompt", help="Print the active prompt path and contents.")
     show_prompt.add_argument("--kind", choices=sorted(DEFAULT_PROMPTS), default="extract", help="Prompt to show. Defaults to extract.")
@@ -208,6 +219,37 @@ def cmd_regression(args: argparse.Namespace) -> int:
     print("Running privacy-safe regression fixtures...", flush=True)
     print(" ".join(command), flush=True)
     return subprocess.run(command).returncode
+
+
+def cmd_eval(args: argparse.Namespace) -> int:
+    config = load_config(args.config)
+    models = args.model or list(DEFAULT_EVAL_MODELS)
+    fixtures = expand_path(args.fixtures) if args.fixtures else default_fixture_dir()
+    output = expand_path(args.out) if args.out else Path.cwd() / "eval-runs" / utc_filename("eval")
+    model_config = dict(config.extract_model)
+    provider_config = config.raw.get("provider")
+    if isinstance(provider_config, dict):
+        model_config.update(provider_config)
+        if "name" in provider_config and "provider" not in provider_config:
+            model_config["provider"] = provider_config["name"]
+    report = run_live_eval(
+        fixtures=fixtures,
+        output_root=output,
+        provider=args.provider,
+        models=models,
+        model_config_base=model_config,
+        threshold=float(config.raw.get("behavior", {}).get("needs_review_confidence_threshold", config.confidence_threshold)),
+        max_calls=args.max_calls,
+    )
+    if args.json:
+        print(json.dumps(report, indent=2, ensure_ascii=False, sort_keys=True))
+    else:
+        print_eval_report(report)
+    return 0 if report.get("passed") else 1
+
+
+def utc_filename(prefix: str) -> str:
+    return prefix + "_" + datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
 
 
 def find_tests_dir() -> Path:
